@@ -1,0 +1,161 @@
+# ArnCode reference
+
+[Back to README](../README.md)
+
+## Command-line options
+
+| Option                                     | Behavior                                                                    |
+| ------------------------------------------ | --------------------------------------------------------------------------- |
+| `-p, --print [prompt]`                     | Run once; read stdin when the prompt is omitted                             |
+| `--cwd <directory>`                        | Work in this directory; defaults to the current directory                   |
+| `--auth <type>`                            | Restrict credentials to `api-key` or `oauth`                                |
+| `--credential <name>`, `--profile <name>`  | Pin one credential without failover                                         |
+| `--model <id>`                             | Default: `claude-opus-5-5`                                                  |
+| `--base-url <url>`                         | Compatible Messages API endpoint; API-key mode only                         |
+| `--effort <level>`                         | `low`, `medium`, `high`, `xhigh`, or `max`; default: `medium`               |
+| `--fast`, `--no-fast`                      | Enable or disable fast mode; default: off                                   |
+| `--max-tokens <n>`                         | Maximum output tokens per API response; default: `64000`                    |
+| `--max-turns <n>`                          | Maximum agent turns per task; default: `80`                                 |
+| `-c, --continue`                           | Resume the newest session for the selected directory                        |
+| `-r, --resume <id>`                        | Resume a saved session; current directory or `--cwd` must match its project |
+| `--safe`, `--ask`                          | Ask before writes, edits, and shell commands                                |
+| `--yolo`, `--dangerously-skip-permissions` | Select the default full-access mode                                         |
+| `--help`, `--version`                      | Show usage or version                                                       |
+
+If both a prompt argument and piped input are present, ArnCode combines them. Assistant text goes to stdout, while progress, tools, diffs, and usage go to stderr:
+
+```sh
+arncode -p "Describe this project in one paragraph" > description.txt
+```
+
+The Messages API backend always streams and uses adaptive thinking. Output-limit continuation attempts are bounded, and incomplete tool calls are not executed. A request has at most four retries for rate-limit or overload responses. `retry-after` and rate-limit reset headers inform delays; a delay beyond the wait limit ends the attempt. Credential-specific failures may trigger failover, while a transient overload does not exhaust an account.
+
+### Prompt caching
+
+API-key requests set three explicit cache breakpoints: the last tool definition, the stable system prompt, and the final block of the latest user message, including tool results. The conversation breakpoint moves forward with each request so eligible unchanged history can be reused. All use the default five-minute ephemeral TTL.
+
+Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt length, and provider support. Short prompts can report zero cache tokens even when caching is requested. See Anthropic's [prompt-caching rules](https://platform.claude.com/docs/en/build-with-claude/prompt-caching). OAuth caching is managed by the Agent SDK.
+
+## Interactive commands
+
+| Command           | Action                                                         |
+| ----------------- | -------------------------------------------------------------- |
+| `/help`           | Show commands                                                  |
+| `/model [id]`     | Show or change the model; `/model list` lists available models |
+| `/auth [type]`    | Show or select `api-key`, `oauth`, or `auto`                   |
+| `/mode [mode]`    | Show or select `full` or `ask`                                 |
+| `/fast [on/off]`  | Toggle fast mode, or set `on` / `off`                          |
+| `/effort [level]` | Show or change effort                                          |
+| `/clear`          | Start a fresh conversation                                     |
+| `/cost`           | Show session usage and estimated cost                          |
+| `/creds`          | Show the credential bank                                       |
+| `/usage`          | Show usage by credential                                       |
+| `/exit`           | Leave the session                                              |
+
+`/mode yolo` and `/mode default` select full access; `/mode safe` selects ask mode. Changing mode clears remembered `always` approvals. In ask mode without an interactive terminal, actions requiring approval are denied immediately with an explanation.
+
+## Credential commands
+
+| Command                        | Action                                                         |
+| ------------------------------ | -------------------------------------------------------------- |
+| `arncode creds add <name>`     | Add a credential from hidden input or stdin                    |
+| `arncode creds list`           | Show names, types, masked suffixes, priorities, and status     |
+| `arncode creds use <name>`     | Prefer an account while retaining failover                     |
+| `arncode creds remove <name>`  | Remove a stored credential                                     |
+| `arncode creds enable <name>`  | Include an account in selection                                |
+| `arncode creds disable <name>` | Exclude an account from selection                              |
+| `arncode creds test <name>`    | Make a tiny Haiku request with that credential                 |
+| `arncode creds usage`          | Show usage for each credential                                 |
+| `arncode creds stats`          | Show aggregate requests, tokens, costs, errors, and limit hits |
+
+`creds add` accepts `--type api-key` or `--type oauth` (the default), and `--priority <integer>` (default: `0`). Lower priorities go first; equal priorities retain insertion order. For token input from a private file or password manager:
+
+```sh
+arncode creds add work --type api-key < /path/to/private-token-file
+```
+
+`arncode auth` is an alias for the credential command group. `auth list` shows names and types only. `auth use <name>` saves a preferred account and clears a persisted auth-type restriction.
+
+`creds test` contacts Anthropic and can incur a small charge. The automated test suite makes no paid requests.
+
+## Authentication and failover
+
+The bank accepts multiple credentials of both types. Selection tries the saved preference, then enabled credentials by priority, then environment fallbacks. `--auth api-key` or `--auth oauth` restricts eligible credentials to that type; `/auth auto` removes the restriction in an interactive session.
+
+`auth use` sets a preference. In contrast, `--credential`, `--profile`, and `ARNCODE_PROFILE` pin a credential and disable rotation. Environment credentials can be pinned as `env:api-key` or `env:oauth`.
+
+Recognized rate-limit, subscription-limit, authentication, and billing failures mark the active credential exhausted. Reset times come from provider headers or SDK error information, with fallback cooldowns when no reset is supplied. Exhausted accounts become eligible again after reset. If no healthy account remains, the task stops with its session saved.
+
+API-key rotation keeps the message history. Crossing between API-key and OAuth engines transfers the conversation transcript and completed tool results as context. Long transcripts are bounded, and hidden thinking and provider-specific session internals do not transfer. Resume with `--continue` after a reset or after adding a usable credential.
+
+### API key
+
+API-key mode uses `@anthropic-ai/sdk`. Supply `ANTHROPIC_API_KEY` or store a key in the bank. `--base-url` / `ANTHROPIC_BASE_URL` selects a compatible Messages API endpoint; model features and error formats depend on that endpoint.
+
+### OAuth
+
+OAuth uses `query()` from `@anthropic-ai/claude-agent-sdk`. Obtain a long-lived token with `claude setup-token` in the official Claude CLI, then store it or supply `CLAUDE_CODE_OAUTH_TOKEN`.
+
+ArnCode strips `ANTHROPIC_API_KEY`, competing Anthropic settings, and provider-selection variables from the SDK child environment before supplying the selected token. OAuth tokens are never sent directly to the Messages API. Custom API base URLs apply only to API-key mode.
+
+Native SDK session logging is disabled. ArnCode stores a redacted transcript and uses it as context when continuing an OAuth conversation. SDK background tasks are disabled; shell work runs in the foreground.
+
+## Configuration and storage
+
+Settings resolve in this order: command-line flags, environment variables, `~/.arncode/config.json`, then defaults. Configuration contains preferences, not credentials:
+
+```json
+{
+  "model": "claude-opus-5-5",
+  "effort": "medium",
+  "fast": false,
+  "maxTokens": 64000,
+  "maxTurns": 80,
+  "permissionMode": "full"
+}
+```
+
+Use `"permissionMode": "ask"` for persistent approval prompts. A configured `auth` value restricts the credential type, and `profile` selects a preferred account. `auth use` clears the auth restriction while setting the preference.
+
+| Environment variable               | Purpose                                                                |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`                | API-key fallback                                                       |
+| `CLAUDE_CODE_OAUTH_TOKEN`          | OAuth fallback                                                         |
+| `ARNCODE_AUTH`                     | Restrict credential type                                               |
+| `ARNCODE_PROFILE`                  | Pin a credential                                                       |
+| `ARNCODE_MODEL`, `ANTHROPIC_MODEL` | Model; `ARNCODE_MODEL` takes precedence                                |
+| `ANTHROPIC_BASE_URL`               | API-key endpoint                                                       |
+| `ARNCODE_EFFORT`                   | Effort level                                                           |
+| `ARNCODE_FAST`                     | Fast mode: `true`, `false`, `1`, or `0`                                |
+| `ARNCODE_MAX_TOKENS`               | Maximum output tokens per API response                                 |
+| `ARNCODE_MAX_TURNS`                | Maximum turns per task                                                 |
+| `ARNCODE_CONFIG_DIR`               | Alternate directory for state, global instructions, and ArnCode skills |
+
+See [`.env.example`](../.env.example) for placeholders. ArnCode does not automatically load `.env` files. Relative `ARNCODE_CONFIG_DIR` paths resolve from the current working directory; credential storage must stay outside Git repositories.
+
+| Default location              | Contents                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| `~/.arncode/config.json`      | Preferences                                                                                     |
+| `~/.arncode/credentials.json` | Credential bank                                                                                 |
+| `~/.arncode/usage.json`       | Per-credential requests, tokens, estimated costs, errors, limit hits, last use, and reset times |
+| `~/.arncode/sessions/`        | Conversations and resume metadata                                                               |
+| `~/.arncode/AGENTS.md`        | Global instructions                                                                             |
+| `~/.arncode/skills/`          | Global skills                                                                                   |
+
+The state directory uses mode `700`; private JSON files use mode `600` and atomic writes. Redaction covers registered secrets and Anthropic token patterns in output and persisted conversations.
+
+Costs are estimates based on known model pricing or the SDK's reported estimate. They do not represent invoices, subscription bills, or remaining quota. Unknown models, custom endpoints, and unsupported pricing combinations report unpriced usage. Usage displays uncached input, output, cache reads, and cache writes separately. Total input is uncached input plus cache-read and cache-write tokens; the uncached figure is not the full prompt size.
+
+OAuth persists observed streamed tokens as unpriced usage while a run is active. The final SDK result reconciles token counts and cost without counting them twice. If the run is interrupted, observed tokens remain recorded with cost unavailable.
+
+## Tools and limits
+
+The API backend provides `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `bash`, and `skill`. Exact edits require a unique match unless `replace_all` is requested. File paths stay inside the project and reject escaping symlinks; shell commands have the account's filesystem and network access.
+
+Read ranges, searches, and command output are bounded. Shell timeouts default to two minutes and can be requested up to thirty minutes. The managed process group is stopped on timeout, cancellation, or shell exit, so API tools do not support persistent background servers. Linux and macOS support this process-group cleanup; use WSL on Windows.
+
+Image inspection is currently available through the OAuth SDK's native Read tool. API-key file tools read text and do not return image content to the model.
+
+OAuth uses SDK-native file and shell tools plus ArnCode's skill loader. Full mode bypasses ArnCode approvals; ask mode applies its prompts through SDK hooks and callbacks. SDK-enforced restrictions still apply.
+
+Skills contain YAML frontmatter with `name` and `description`. Their metadata is placed in the initial prompt; the body is loaded only when requested. Discovery order is project `.arncode/skills`, project `.claude/skills`, global ArnCode `skills`, then `~/.claude/skills`; the first matching name wins. Skill bodies are limited to 120 kB.
