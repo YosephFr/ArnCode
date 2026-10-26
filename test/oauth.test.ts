@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -22,11 +22,26 @@ import { appendTranscript, newSession } from '../src/session.js';
 import type { Settings } from '../src/types.js';
 import { addUsage, emptyUsage, formatUsage } from '../src/usage.js';
 
-const sdk = vi.hoisted(() => ({ query: vi.fn() }));
-vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@anthropic-ai/claude-agent-sdk')>()),
-  query: sdk.query,
+const sdk = vi.hoisted(() => ({
+  query: vi.fn(),
+  createServer:
+    vi.fn<
+      (
+        options: Parameters<typeof import('@anthropic-ai/claude-agent-sdk').createSdkMcpServer>[0],
+      ) => void
+    >(),
 }));
+vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@anthropic-ai/claude-agent-sdk')>();
+  return {
+    ...actual,
+    query: sdk.query,
+    createSdkMcpServer: (options: Parameters<typeof actual.createSdkMcpServer>[0]) => {
+      sdk.createServer(options);
+      return actual.createSdkMcpServer(options);
+    },
+  };
+});
 
 const directories: string[] = [];
 const uuid = '11111111-1111-4111-8111-111111111111';
@@ -34,6 +49,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   sdk.query.mockReset();
+  sdk.createServer.mockReset();
   await Promise.all(directories.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -188,6 +204,57 @@ function persistUsage(ctx: EngineContext): MeterStore {
 }
 
 describe('OAuth configuration and permissions', () => {
+  it('guards direct paths and both MCP searches even without running the tool hooks', async () => {
+    const ctx = await context({ protectedPaths: ['private'], permissionMode: 'ask' });
+    const prompt = vi.fn(async () => 'n');
+    ctx.approve = new PermissionManager('ask', false, prompt).approve;
+    await mkdir(join(ctx.settings.cwd, 'private'));
+    await writeFile(join(ctx.settings.cwd, '.env.example'), 'blocked_payload');
+    await writeFile(join(ctx.settings.cwd, 'private', 'account.txt'), 'blocked_payload');
+    await writeFile(join(ctx.settings.cwd, 'public.txt'), 'public_payload');
+    const options = await oauthOptions(ctx, new AbortController());
+    expect(options.tools).not.toContain('Glob');
+    expect(options.tools).not.toContain('Grep');
+    const registered = sdk.createServer.mock.calls.at(-1)?.[0].tools;
+    const glob = registered?.find((entry) => entry.name === 'glob');
+    const grep = registered?.find((entry) => entry.name === 'grep');
+    if (!glob || !grep) throw new Error('Guarded search tools are required');
+    const found = await glob.handler({ pattern: '**/*', path: '.' }, undefined);
+    expect(JSON.stringify(found)).toContain('public.txt');
+    expect(JSON.stringify(found)).not.toContain('account.txt');
+    expect(JSON.stringify(found)).not.toContain('.env');
+    const matched = await grep.handler(
+      { pattern: 'payload', path: '.', glob: '**/*', literal: true, ignore_case: false },
+      undefined,
+    );
+    expect(JSON.stringify(matched)).toContain('public_payload');
+    expect(JSON.stringify(matched)).not.toContain('blocked_payload');
+    expect(ctx.ui.tool).not.toHaveBeenCalled();
+    expect(ctx.ui.notice).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+    const pre = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    if (!pre) throw new Error('PreToolUse hook is required');
+    const denied = await pre(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Read',
+        tool_input: { file_path: 'private/account.txt' },
+        tool_use_id: 'protected-read',
+        session_id: 'sdk-thread',
+        transcript_path: '',
+        cwd: ctx.settings.cwd,
+      },
+      undefined,
+      { signal: ctx.signal },
+    );
+    expect(denied).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'Path is protected by protectedPaths.',
+      },
+    });
+  });
+
   it('passes only the selected OAuth credential without mutating the parent environment', async () => {
     const conflicting = {
       ANTHROPIC_API_KEY: 'other-api-fixture-token',
@@ -335,7 +402,7 @@ describe('OAuth configuration and permissions', () => {
     await pre({ ...common, hook_event_name: 'PreToolUse' }, undefined, { signal: ctx.signal });
     const overlapping = {
       ...common,
-      tool_name: 'Grep',
+      tool_name: 'mcp__arncode__grep',
       tool_input: { pattern: 'needle' },
       tool_use_id: 'search-files',
     };

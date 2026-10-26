@@ -5,7 +5,7 @@ coverage
 .env
 .env.*
 **/.env*
-.agents.env
+**/*.env
 .secrets
 **/.secrets
 .arncode

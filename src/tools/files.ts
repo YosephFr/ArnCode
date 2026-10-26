@@ -5,7 +5,13 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { AgentUI } from '../types.js';
 import { redact } from '../redact.js';
-import { ensureDirectory, projectPath } from './paths.js';
+import {
+  createPathPolicy,
+  ensureDirectory,
+  isProtected,
+  projectPath,
+  type PathPolicy,
+} from './paths.js';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_RESULT_CHARS = 48_000;
@@ -50,8 +56,9 @@ export async function readText(
   cwd: string,
   input: { path: string; offset: number; limit: number },
   signal?: AbortSignal,
+  policy?: PathPolicy,
 ): Promise<string> {
-  const file = await projectPath(cwd, input.path);
+  const file = await projectPath(cwd, input.path, false, policy);
   const info = await stat(file);
   if (!info.isFile()) throw new Error('Path is not a regular file.');
   if (info.size > 50 * 1024 * 1024)
@@ -97,10 +104,11 @@ export async function writeText(
   cwd: string,
   input: { path: string; content: string },
   ui: AgentUI,
+  policy?: PathPolicy,
 ): Promise<string> {
   if (Buffer.byteLength(input.content) > MAX_FILE_BYTES)
     throw new Error('Content exceeds the 5 MiB write limit.');
-  const file = await projectPath(cwd, input.path, true);
+  const file = await projectPath(cwd, input.path, true, policy);
   const before = await textFile(file).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return '';
     throw error;
@@ -114,8 +122,9 @@ export async function editText(
   cwd: string,
   input: { path: string; old_string: string; new_string: string; replace_all: boolean },
   ui: AgentUI,
+  policy?: PathPolicy,
 ): Promise<string> {
-  const file = await projectPath(cwd, input.path);
+  const file = await projectPath(cwd, input.path, false, policy);
   const before = await textFile(file);
   const parts = before.split(input.old_string);
   const matches = parts.length - 1;
@@ -135,11 +144,17 @@ export async function editText(
   return `Edited ${path.relative(cwd, file)} (${matches} replacement${matches === 1 ? '' : 's'}).`;
 }
 
-export async function listDirectory(cwd: string, input: { path: string }): Promise<string> {
-  const directory = await ensureDirectory(cwd, input.path);
+export async function listDirectory(
+  cwd: string,
+  input: { path: string },
+  policy?: PathPolicy,
+): Promise<string> {
+  const guard = policy ?? (await createPathPolicy(cwd));
+  const directory = await ensureDirectory(cwd, input.path, guard);
   const entries: string[] = [];
   let more = false;
   for await (const entry of await opendir(directory)) {
+    if (await isProtected(path.join(directory, entry.name), guard)) continue;
     if (entries.length === 1000) {
       more = true;
       break;

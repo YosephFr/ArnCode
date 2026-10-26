@@ -13,6 +13,8 @@ const readOnlyTools = new Set([
   'grep',
   'skill',
   'mcp__arncode__skill',
+  'mcp__arncode__glob',
+  'mcp__arncode__grep',
   'Read',
   'Glob',
   'Grep',

@@ -148,6 +148,22 @@ Costs are estimates based on known model pricing or the SDK's reported estimate.
 
 OAuth persists observed streamed tokens as unpriced usage while a run is active. The final SDK result reconciles token counts and cost without counting them twice. If the run is interrupted, observed tokens remain recorded with cost unavailable.
 
+### Protected paths
+
+`protectedPaths` adds exclusions for file reads, writes, edits, directory listings, and searches in both auth modes:
+
+```json
+{
+  "protectedPaths": ["private", "**/*.pem", "~/private-config"]
+}
+```
+
+The defaults are `~/.arncode`, `~/.secrets`, `~/.ssh`, `**/.env`, and `**/.env.*`. Custom entries are merged and deduplicated with these defaults; an empty array does not remove them. The actual `ARNCODE_CONFIG_DIR` is always protected too. `.env.example` matches the default exclusions.
+
+Relative entries resolve from the selected project directory. Absolute paths and a leading `~/` are supported. `*` matches characters within one path segment, `?` matches one character, and a complete `**` segment matches any number of path segments. Other characters are literal: there are no negated patterns, character classes, braces, or escape syntax. A matching path also protects its descendants. Checks cover both the requested path and its resolved target; configured literal paths and the static prefix of a pattern also resolve symlinks.
+
+OAuth uses the same guarded `glob` and `grep` searches as API-key mode through its MCP server, alongside native Read, Write, Edit, and Bash tools. Protection is enforced inside search tools as well as direct file hooks. Shell commands retain your account's filesystem and network access; protected paths and approval prompts are not a sandbox.
+
 ## Tools and limits
 
 The API backend provides `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `bash`, and `skill`. Exact edits require a unique match unless `replace_all` is requested. File paths stay inside the project and reject escaping symlinks; shell commands have the account's filesystem and network access.
@@ -156,6 +172,6 @@ Read ranges, searches, and command output are bounded. Shell timeouts default to
 
 Image inspection is currently available through the OAuth SDK's native Read tool. API-key file tools read text and do not return image content to the model.
 
-OAuth uses SDK-native file and shell tools plus ArnCode's skill loader. Full mode bypasses ArnCode approvals; ask mode applies its prompts through SDK hooks and callbacks. SDK-enforced restrictions still apply.
+OAuth uses SDK-native Read, Write, Edit, and Bash tools, plus ArnCode's guarded searches and skill loader. Full mode bypasses ArnCode approvals; ask mode applies its prompts through SDK hooks and callbacks. SDK-enforced restrictions still apply.
 
 Skills contain YAML frontmatter with `name` and `description`. Their metadata is placed in the initial prompt; the body is loaded only when requested. Discovery order is project `.arncode/skills`, project `.claude/skills`, global ArnCode `skills`, then `~/.claude/skills`; the first matching name wins. Skill bodies are limited to 120 kB.

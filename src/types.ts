@@ -15,6 +15,7 @@ export interface Settings {
   maxTokens: number;
   maxTurns: number;
   permissionMode: PermissionMode;
+  protectedPaths: string[];
 }
 
 export interface AgentUI {

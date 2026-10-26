@@ -2,19 +2,11 @@ import fg from 'fast-glob';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { redact } from '../redact.js';
-import { ensureDirectory, isProtected } from './paths.js';
+import { createPathPolicy, ensureDirectory, isProtected, type PathPolicy } from './paths.js';
 import { runProcess } from './process.js';
 import { truncate } from './files.js';
 
-const IGNORE = [
-  '**/.git/**',
-  '**/node_modules/**',
-  '**/dist/**',
-  '**/build/**',
-  '**/.arncode/**',
-  '**/.secrets/**',
-  '**/.agents.env',
-];
+const IGNORE = ['**/.git/**', '**/node_modules/**', '**/dist/**', '**/build/**'];
 
 function validatePattern(pattern: string): void {
   if (path.isAbsolute(pattern) || pattern.split(/[\\/]/).includes('..')) {
@@ -26,6 +18,7 @@ async function collectFiles(
   cwd: string,
   directory: string,
   pattern: string,
+  policy: PathPolicy,
   signal?: AbortSignal,
 ): Promise<{ files: string[]; truncated: boolean }> {
   signal?.throwIfAborted();
@@ -52,7 +45,7 @@ async function collectFiles(
     for await (const entry of stream) {
       if (typeof entry !== 'string') throw new Error('Unexpected search result.');
       const target = path.resolve(directory, entry);
-      if (isProtected(target)) continue;
+      if (await isProtected(target, policy)) continue;
       if (files.length === 10_000) {
         truncated = true;
         break;
@@ -71,9 +64,11 @@ export async function globFiles(
   cwd: string,
   input: { pattern: string; path: string },
   signal?: AbortSignal,
+  policy?: PathPolicy,
 ): Promise<string> {
-  const directory = await ensureDirectory(cwd, input.path);
-  const { files, truncated } = await collectFiles(cwd, directory, input.pattern, signal);
+  const guard = policy ?? (await createPathPolicy(cwd));
+  const directory = await ensureDirectory(cwd, input.path, guard);
+  const { files, truncated } = await collectFiles(cwd, directory, input.pattern, guard, signal);
   if (truncated) files.push('[Truncated after 10000 files; narrow the pattern.]');
   return truncate(redact(files.join('\n') || '[No matching files]'));
 }
@@ -129,9 +124,11 @@ export async function grepFiles(
   cwd: string,
   input: { pattern: string; path: string; glob: string; literal: boolean; ignore_case: boolean },
   signal?: AbortSignal,
+  policy?: PathPolicy,
 ): Promise<string> {
-  const directory = await ensureDirectory(cwd, input.path);
-  const { files, truncated } = await collectFiles(cwd, directory, input.glob, signal);
+  const guard = policy ?? (await createPathPolicy(cwd));
+  const directory = await ensureDirectory(cwd, input.path, guard);
+  const { files, truncated } = await collectFiles(cwd, directory, input.glob, guard, signal);
   const result = await runProcess({
     command: process.execPath,
     args: ['-e', SEARCH_SCRIPT],

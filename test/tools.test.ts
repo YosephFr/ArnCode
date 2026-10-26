@@ -4,6 +4,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolRunner } from '../src/tools/index.js';
+import { createPathPolicy } from '../src/tools/paths.js';
 import type { AgentUI, Approve } from '../src/types.js';
 
 let directory: string;
@@ -25,6 +26,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
 });
 
@@ -33,6 +35,95 @@ function quote(value: string): string {
 }
 
 describe('project file tools', () => {
+  it('matches segment wildcards, literal punctuation and complete protected subtrees', async () => {
+    const policy = await createPathPolicy(directory, [
+      'private/**',
+      'keys/key?.txt',
+      'literal[1].txt',
+    ]);
+    for (const file of ['private', 'private/nested/file', 'keys/key1.txt', 'literal[1].txt'])
+      expect(policy.matches(path.join(directory, file)), file).toBe(true);
+    for (const file of ['private-other/file', 'keys/key12.txt', 'literal1.txt'])
+      expect(policy.matches(path.join(directory, file)), file).toBe(false);
+    const all = await createPathPolicy(directory, [path.parse(directory).root]);
+    expect(all.matches(path.join(directory, 'any-file'))).toBe(true);
+  });
+
+  it('protects default env files, configured paths, and aliases across reads, writes and searches', async () => {
+    await mkdir(path.join(directory, 'nested'));
+    await mkdir(path.join(directory, 'private'));
+    await mkdir(path.join(directory, 'state'));
+    vi.stubEnv('ARNCODE_CONFIG_DIR', path.join(directory, 'state'));
+    for (const file of [
+      '.env',
+      '.env.example',
+      'nested/.env.production',
+      'nested/key.secret',
+      'private/account.txt',
+      'private/line\nbreak.txt',
+      'state/credentials.json',
+    ]) {
+      await writeFile(path.join(directory, file), 'blocked_payload');
+    }
+    await writeFile(path.join(directory, 'public.txt'), 'public_payload');
+    await symlink(path.join(directory, 'private'), path.join(directory, 'protected-link'));
+    await symlink(path.join(directory, 'private'), path.join(directory, 'other-link'));
+    await symlink(path.join(directory, '.env'), path.join(directory, 'env-alias.txt'));
+    await symlink(path.join(directory, 'public.txt'), path.join(directory, '.env.alias'));
+    runner = new ToolRunner({
+      cwd: directory,
+      approve: async () => ({ allowed: true }),
+      ui,
+      protectedPaths: ['protected-link', 'nested/*.secret'],
+    });
+    for (const file of [
+      '.env',
+      '.env.example',
+      '.env.alias',
+      'nested/.env.production',
+      'nested/key.secret',
+      'private/account.txt',
+      'private/line\nbreak.txt',
+      'other-link/account.txt',
+      'env-alias.txt',
+      'state/credentials.json',
+    ]) {
+      const read = await runner.run('read_file', { path: file });
+      expect(read.is_error, file).toBe(true);
+      expect(read.content, file).toContain('protectedPaths');
+      expect(read.content).not.toContain('blocked_payload');
+    }
+    expect(
+      (await runner.run('write_file', { path: 'nested/.env.new', content: 'changed' })).is_error,
+    ).toBe(true);
+    expect(
+      (
+        await runner.run('edit_file', {
+          path: 'other-link/account.txt',
+          old_string: 'blocked_payload',
+          new_string: 'changed',
+        })
+      ).is_error,
+    ).toBe(true);
+    expect(await readFile(path.join(directory, 'private/account.txt'), 'utf8')).toBe(
+      'blocked_payload',
+    );
+    expect((await runner.run('read_file', { path: 'public.txt' })).content).toContain(
+      'public_payload',
+    );
+    const glob = await runner.run('glob', { pattern: '**/*' });
+    expect(glob.is_error).toBeUndefined();
+    expect(glob.content).toBe('public.txt');
+    const grep = await runner.run('grep', { pattern: 'payload', literal: true });
+    expect(grep.is_error).toBeUndefined();
+    expect(grep.content).toContain('public.txt:1:public_payload');
+    expect(grep.content).not.toContain('blocked_payload');
+    expect((await runner.run('glob', { path: 'private', pattern: '**/*' })).is_error).toBe(true);
+    expect((await runner.run('grep', { path: 'other-link', pattern: 'payload' })).is_error).toBe(
+      true,
+    );
+  });
+
   it('writes nested files, reads ranges, and preserves literal replacements', async () => {
     const written = await runner.run('write_file', {
       path: 'src/greeting.txt',
@@ -161,6 +252,28 @@ describe('project file tools', () => {
 });
 
 describe('shell tool', () => {
+  it('does not apply file path policies to shell commands or explicit skill loading', async () => {
+    await symlink('loop', path.join(directory, 'loop'));
+    const skillDir = path.join(directory, '.arncode/skills/example');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: example\ndescription: Load a test procedure.\n---\nLoaded fixture instructions.\n',
+    );
+    runner = new ToolRunner({
+      cwd: directory,
+      approve: async () => ({ allowed: true }),
+      ui,
+      protectedPaths: ['loop'],
+    });
+    expect((await runner.run('bash', { command: "printf 'shell works'" })).content).toContain(
+      'shell works',
+    );
+    const skill = await runner.run('skill', { name: 'example' });
+    expect(skill.is_error).toBeUndefined();
+    expect(skill.content).toContain('Loaded fixture instructions.');
+  });
+
   it('uses project cwd and returns separate streams, exit status, and bounded output', async () => {
     const result = await runner.run('bash', { command: 'pwd; printf err >&2; exit 7' });
     expect(result.is_error).toBe(true);

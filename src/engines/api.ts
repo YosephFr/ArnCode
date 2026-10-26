@@ -56,7 +56,12 @@ export function cacheConversation(messages: MessageParam[]): MessageParam[] {
 export async function runAPI(ctx: EngineContext): Promise<void> {
   const { settings, session, ui, signal } = ctx;
   const client = apiClient(ctx.credential.secret, settings.baseUrl);
-  const runner = new ToolRunner({ cwd: settings.cwd, approve: ctx.approve, ui });
+  const runner = new ToolRunner({
+    cwd: settings.cwd,
+    approve: ctx.approve,
+    ui,
+    protectedPaths: settings.protectedPaths,
+  });
   const system = await systemPrompt(settings.cwd);
   let cutoffs = 0;
   while (ctx.budget.remaining > 0) {

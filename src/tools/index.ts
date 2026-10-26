@@ -7,6 +7,7 @@ import { globFiles, grepFiles } from './search.js';
 import { runProcess } from './process.js';
 import { loadSkill } from '../skills.js';
 import { formatToolResult } from '../ui.js';
+import { createPathPolicy } from './paths.js';
 
 export { toolDefinitions } from './definitions.js';
 
@@ -51,13 +52,22 @@ const schemas = {
     .strict(),
 };
 
+export { schemas as toolSchemas };
+
 export interface ToolResult {
   content: string;
   is_error?: boolean;
 }
 
 export class ToolRunner {
-  constructor(private readonly options: { cwd: string; approve: Approve; ui: AgentUI }) {}
+  constructor(
+    private readonly options: {
+      cwd: string;
+      approve: Approve;
+      ui: AgentUI;
+      protectedPaths?: readonly string[];
+    },
+  ) {}
 
   async run(name: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
     const started = Date.now();
@@ -91,6 +101,10 @@ export class ToolRunner {
       }
       const value = parsed.data;
       const cwd = await realpath(this.options.cwd);
+      const policy =
+        tool === 'bash' || tool === 'skill'
+          ? undefined
+          : await createPathPolicy(cwd, this.options.protectedPaths);
       this.options.ui.tool(name, value);
       const approval = await this.options.approve(name, value, signal);
       if (!approval.allowed) {
@@ -110,22 +124,22 @@ export class ToolRunner {
           };
         }
         case 'read_file':
-          content = await readText(cwd, schemas.read_file.parse(value), signal);
+          content = await readText(cwd, schemas.read_file.parse(value), signal, policy);
           break;
         case 'write_file':
-          content = await writeText(cwd, schemas.write_file.parse(value), this.options.ui);
+          content = await writeText(cwd, schemas.write_file.parse(value), this.options.ui, policy);
           break;
         case 'edit_file':
-          content = await editText(cwd, schemas.edit_file.parse(value), this.options.ui);
+          content = await editText(cwd, schemas.edit_file.parse(value), this.options.ui, policy);
           break;
         case 'list_dir':
-          content = await listDirectory(cwd, schemas.list_dir.parse(value));
+          content = await listDirectory(cwd, schemas.list_dir.parse(value), policy);
           break;
         case 'glob':
-          content = await globFiles(cwd, schemas.glob.parse(value), signal);
+          content = await globFiles(cwd, schemas.glob.parse(value), signal, policy);
           break;
         case 'grep':
-          content = await grepFiles(cwd, schemas.grep.parse(value), signal);
+          content = await grepFiles(cwd, schemas.grep.parse(value), signal, policy);
           break;
         case 'bash': {
           const { command, timeout_ms } = schemas.bash.parse(value);

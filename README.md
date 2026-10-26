@@ -133,6 +133,8 @@ Credentials, preferences, usage, and saved conversations live under `~/.arncode`
 
 Registered secrets and Anthropic token patterns are redacted from output and saved conversations. Native SDK session logging is disabled; OAuth resumes from ArnCode's redacted transcript. OAuth also records streamed token usage before completion and reconciles it with the final SDK result; interrupted runs retain observed tokens with cost unavailable.
 
+File and search tools exclude protected paths in both auth modes. Defaults cover `~/.arncode`, `~/.secrets`, `~/.ssh`, `**/.env`, and `**/.env.*`, including `.env.example`. Add project-relative paths or patterns with `protectedPaths` in configuration; defaults and the active state directory remain protected. See [protected paths](docs/reference.md#protected-paths) for matching rules. Shell commands still have your account's access; these exclusions are not a sandbox.
+
 `/cost` shows session usage; `/usage` and `arncode creds usage` show per-credential totals, separating uncached input, output, cache reads, and cache writes. Costs are estimates, not invoices or remaining subscription quota. Unknown pricing and custom endpoints report unpriced usage. See [configuration and storage](docs/reference.md#configuration-and-storage) for file locations and environment variables.
 
 ## Architecture

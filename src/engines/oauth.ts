@@ -11,7 +11,8 @@ import { buildOAuthEnv } from '../auth.js';
 import { appendTranscript, portableContext } from '../session.js';
 import { systemPrompt } from '../prompt.js';
 import { emptyUsage, type UsageTotals } from '../usage.js';
-import { projectPath } from '../tools/paths.js';
+import { createPathPolicy, projectPath } from '../tools/paths.js';
+import { ToolRunner, toolSchemas } from '../tools/index.js';
 import { discoverSkills, loadSkill } from '../skills.js';
 import { z } from 'zod';
 import { redact, StreamingRedactor } from '../redact.js';
@@ -105,21 +106,17 @@ export async function oauthOptions(
   const pre: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const args = record(input.tool_input);
-    ctx.ui.tool(input.tool_name === 'mcp__arncode__skill' ? 'skill' : input.tool_name, args);
+    const displayName = input.tool_name.replace(/^mcp__arncode__/, '');
+    ctx.ui.tool(displayName, args);
     try {
       if (
         ['Read', 'Write', 'Edit'].includes(input.tool_name) &&
         typeof args.file_path === 'string'
       ) {
-        await projectPath(ctx.settings.cwd, args.file_path, input.tool_name === 'Write');
+        const policy = await createPathPolicy(ctx.settings.cwd, ctx.settings.protectedPaths);
+        await projectPath(ctx.settings.cwd, args.file_path, input.tool_name === 'Write', policy);
       } else if (['Glob', 'Grep'].includes(input.tool_name)) {
-        await projectPath(ctx.settings.cwd, typeof args.path === 'string' ? args.path : '.');
-        if (
-          input.tool_name === 'Glob' &&
-          typeof args.pattern === 'string' &&
-          (path.isAbsolute(args.pattern) || args.pattern.split(/[\\/]/).includes('..'))
-        )
-          throw new Error('Glob pattern must stay inside the project directory.');
+        throw new Error('Native search is disabled. Use the provided glob and grep tools.');
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Invalid tool path.';
@@ -156,7 +153,7 @@ export async function oauthOptions(
       const before = await fileSnapshot(file);
       if (before !== undefined) snapshots.set(input.tool_use_id, { file, before });
     }
-    started.set(input.tool_use_id, { name: input.tool_name, at: Date.now() });
+    started.set(input.tool_use_id, { name: displayName, at: Date.now() });
     activity();
     return ctx.settings.permissionMode === 'full'
       ? {}
@@ -186,7 +183,7 @@ export async function oauthOptions(
       } else {
         ctx.ui.notice(
           formatToolResult(
-            input.tool_name,
+            input.tool_name.replace(/^mcp__arncode__/, ''),
             input.tool_name === 'Bash' ? bashOutput(output) : (text ?? ''),
             {
               isError,
@@ -225,46 +222,80 @@ export async function oauthOptions(
     return {};
   };
   const skills = await discoverSkills(ctx.settings.cwd);
-  const mcpServers: NonNullable<Options['mcpServers']> = {};
-  if (skills.length) {
-    const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk');
-    mcpServers.arncode = createSdkMcpServer({
+  const { createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk');
+  const quiet = () => {};
+  const search = new ToolRunner({
+    cwd: ctx.settings.cwd,
+    protectedPaths: ctx.settings.protectedPaths,
+    approve: ctx.approve,
+    ui: {
+      text: quiet,
+      endText: quiet,
+      status: quiet,
+      idle: quiet,
+      notice: quiet,
+      tool: quiet,
+      diff: quiet,
+    },
+  });
+  const searchResult = async (name: 'glob' | 'grep', args: unknown) => {
+    const result = await search.run(name, args, ctx.signal);
+    return { content: [{ type: 'text' as const, text: result.content }], isError: result.is_error };
+  };
+  const mcpServers: NonNullable<Options['mcpServers']> = {
+    arncode: createSdkMcpServer({
       name: 'arncode',
       version: '0.1.0',
       tools: [
         tool(
-          'skill',
-          'Load the full instructions of an available skill by name.',
-          { name: z.string() },
-          async ({ name }) => {
-            try {
-              const skill = await loadSkill(ctx.settings.cwd, name);
-              return {
-                content: [
-                  {
-                    type: 'text',
-                    text: redact(
-                      `Skill: ${skill.name}\nBase directory: ${skill.basePath}\n\n${skill.body}`,
-                    ),
-                  },
-                ],
-              };
-            } catch (error) {
-              return {
-                isError: true,
-                content: [
-                  {
-                    type: 'text',
-                    text: redact(error instanceof Error ? error.message : String(error)),
-                  },
-                ],
-              };
-            }
-          },
+          'glob',
+          'Find project files while excluding protected paths.',
+          toolSchemas.glob.shape,
+          (args) => searchResult('glob', args),
         ),
+        tool(
+          'grep',
+          'Search project text while excluding protected paths.',
+          toolSchemas.grep.shape,
+          (args) => searchResult('grep', args),
+        ),
+        ...(skills.length
+          ? [
+              tool(
+                'skill',
+                'Load the full instructions of an available skill by name.',
+                { name: z.string() },
+                async ({ name }) => {
+                  try {
+                    const skill = await loadSkill(ctx.settings.cwd, name);
+                    return {
+                      content: [
+                        {
+                          type: 'text',
+                          text: redact(
+                            `Skill: ${skill.name}\nBase directory: ${skill.basePath}\n\n${skill.body}`,
+                          ),
+                        },
+                      ],
+                    };
+                  } catch (error) {
+                    return {
+                      isError: true,
+                      content: [
+                        {
+                          type: 'text',
+                          text: redact(error instanceof Error ? error.message : String(error)),
+                        },
+                      ],
+                    };
+                  }
+                },
+              ),
+            ]
+          : []),
       ],
-    });
-  }
+    }),
+  };
   return {
     cwd: ctx.settings.cwd,
     model: ctx.settings.model,
@@ -276,7 +307,7 @@ export async function oauthOptions(
     settingSources: [],
     mcpServers,
     strictMcpConfig: true,
-    tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+    tools: ['Read', 'Write', 'Edit', 'Bash'],
     permissionMode: ctx.settings.permissionMode === 'full' ? 'bypassPermissions' : 'default',
     allowDangerouslySkipPermissions: ctx.settings.permissionMode === 'full',
     ...(ctx.settings.permissionMode === 'ask'

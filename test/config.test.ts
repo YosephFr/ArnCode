@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { addProfile } from '../src/auth.js';
 import {
+  DEFAULT_PROTECTED_PATHS,
   getConfigDir,
   readConfig,
   resolveConfiguration,
@@ -23,6 +24,28 @@ afterEach(async () => {
 });
 
 describe('configuration', () => {
+  it('merges protected paths without removing defaults or repeating entries', async () => {
+    const dir = await temporary();
+    await writeConfig({ protectedPaths: ['private', '~/.ssh', 'private'] }, dir);
+    const settings = resolveSettings(
+      { protectedPaths: ['extra', 'private'] },
+      {},
+      await readConfig(dir),
+    );
+    expect(settings.protectedPaths).toEqual([...DEFAULT_PROTECTED_PATHS, 'private', 'extra']);
+    expect(
+      resolveSettings({ protectedPaths: [] }, {}, { protectedPaths: [] }).protectedPaths,
+    ).toEqual(DEFAULT_PROTECTED_PATHS);
+    await expect(writeConfig({ protectedPaths: [''] }, dir)).rejects.toThrow('protectedPaths');
+    expect(await readConfig(dir)).toEqual({ protectedPaths: ['private', '~/.ssh', 'private'] });
+    const custom = Array.from({ length: 256 }, (_, index) => `private-${index}`);
+    await writeConfig({ protectedPaths: custom }, dir);
+    expect(resolveSettings({}, {}, await readConfig(dir)).protectedPaths).toEqual([
+      ...DEFAULT_PROTECTED_PATHS,
+      ...custom,
+    ]);
+  });
+
   it('resolves an optional isolated configuration directory', () => {
     vi.stubEnv('ARNCODE_CONFIG_DIR', '../arncode-state');
     expect(getConfigDir()).toBe(resolve('../arncode-state'));

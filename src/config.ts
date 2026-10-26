@@ -8,6 +8,13 @@ import type { Settings } from './types.js';
 const authSchema = z.enum(['api-key', 'oauth']);
 const effortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 const profileSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);
+export const DEFAULT_PROTECTED_PATHS = [
+  '~/.arncode',
+  '~/.secrets',
+  '~/.ssh',
+  '**/.env',
+  '**/.env.*',
+];
 const baseUrlSchema = z
   .string()
   .url()
@@ -33,6 +40,16 @@ const userConfigSchema = z
     maxTokens: z.number().int().min(1).max(128000).optional(),
     maxTurns: z.number().int().min(1).max(1000).optional(),
     permissionMode: z.enum(['full', 'ask']).optional(),
+    protectedPaths: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(4096)
+          .refine((value) => !['\0', '\r', '\n'].some((character) => value.includes(character))),
+      )
+      .max(256)
+      .optional(),
   })
   .strict();
 
@@ -46,6 +63,7 @@ export const DEFAULTS = {
   maxTokens: 64000,
   maxTurns: 80,
   permissionMode: 'full',
+  protectedPaths: [...DEFAULT_PROTECTED_PATHS],
 } satisfies Omit<Settings, 'cwd'>;
 
 export function getConfigDir(): string {
@@ -93,6 +111,9 @@ export function resolveSettings(
   env: NodeJS.ProcessEnv = process.env,
   config: UserConfig = {},
 ): Settings {
+  const configuredPaths =
+    validateConfig({ protectedPaths: config.protectedPaths }).protectedPaths ?? [];
+  const flagPaths = validateConfig({ protectedPaths: flags.protectedPaths }).protectedPaths ?? [];
   const explicitAuth = flags.authRestriction ?? flags.auth ?? env.ARNCODE_AUTH ?? config.auth;
   const pinnedCredential = flags.pinnedCredential ?? flags.profile ?? env.ARNCODE_PROFILE;
   const settings = validateConfig({
@@ -116,6 +137,7 @@ export function resolveSettings(
   return {
     ...DEFAULTS,
     ...settings,
+    protectedPaths: [...new Set([...DEFAULT_PROTECTED_PATHS, ...configuredPaths, ...flagPaths])],
     cwd: resolve(flags.cwd ?? process.cwd()),
     ...(explicitAuth ? { authRestriction: authSchema.parse(explicitAuth) } : {}),
     ...(pinnedCredential ? { pinnedCredential: profileSchema.parse(pinnedCredential) } : {}),
