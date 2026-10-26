@@ -1,0 +1,14 @@
+.git
+node_modules
+dist
+coverage
+.env
+.env.*
+**/.env*
+.agents.env
+.secrets
+**/.secrets
+.arncode
+.claude
+**/credentials.json
+*.log
