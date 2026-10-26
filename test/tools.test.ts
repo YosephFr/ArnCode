@@ -70,6 +70,7 @@ describe('project file tools', () => {
     });
     expect(ambiguous.is_error).toBe(true);
     expect(ambiguous.content).toContain('2 times');
+    expect(ui.notice).toHaveBeenCalledWith(expect.stringMatching(/edit_file failed[\s\S]*2 times/));
     expect(await readFile(path.join(directory, 'a.txt'), 'utf8')).toBe('same same');
     expect(ui.diff).not.toHaveBeenCalled();
     const absent = await runner.run('edit_file', {
@@ -166,6 +167,11 @@ describe('shell tool', () => {
     expect(result.content).toContain(`stdout:\n${directory}`);
     expect(result.content).toContain('stderr:\nerr');
     expect(result.content).toContain('Exit code: 7');
+    expect(ui.notice).toHaveBeenCalledWith(
+      expect.stringMatching(/bash failed[\s\S]*Exit code: 7[\s\S]*stderr:\n\s+err/),
+    );
+    expect(ui.status).toHaveBeenCalledWith('Running bash');
+    expect(ui.idle).toHaveBeenCalled();
     const large = await runner.run('bash', {
       command: `${quote(process.execPath)} -e ${quote('process.stdout.write("x".repeat(100000));process.stderr.write("end")')}`,
     });
@@ -173,6 +179,12 @@ describe('shell tool', () => {
     expect(large.content.length).toBeLessThan(49_000);
     expect(large.content).toContain('Truncated');
     expect(large.content).toContain('stderr:\nend');
+    const both = await runner.run('bash', {
+      command: `${quote(process.execPath)} -e ${quote('process.stdout.write("x".repeat(30000));process.stderr.write("y".repeat(30000)+"\\nFinal render error");process.exitCode=7')}`,
+    });
+    expect(both.content.length).toBeLessThan(49_000);
+    expect(both.content).toContain('Final render error');
+    expect(ui.notice).toHaveBeenLastCalledWith(expect.stringContaining('Final render error'));
   });
 
   it('stops the process group on timeout before descendants can write', async () => {
@@ -180,6 +192,7 @@ describe('shell tool', () => {
     const result = await runner.run('bash', { command, timeout_ms: 100 });
     expect(result.is_error).toBe(true);
     expect(result.content).toContain('Timed out');
+    expect(ui.notice).toHaveBeenCalledWith(expect.stringContaining('Timed out after 100 ms'));
     await delay(600);
     await expect(readFile(path.join(directory, 'escaped'))).rejects.toMatchObject({
       code: 'ENOENT',

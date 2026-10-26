@@ -1,9 +1,10 @@
-import { readFile, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   HookCallback,
   Options,
-  SDKResultMessage,
+  Query,
   SDKRateLimitInfo,
 } from '@anthropic-ai/claude-agent-sdk';
 import { buildOAuthEnv } from '../auth.js';
@@ -14,8 +15,12 @@ import { projectPath } from '../tools/paths.js';
 import { discoverSkills, loadSkill } from '../skills.js';
 import { z } from 'zod';
 import { redact, StreamingRedactor } from '../redact.js';
+import { formatToolResult } from '../ui.js';
 import type { Approval } from '../types.js';
 import type { EngineContext } from './types.js';
+import { OAuthUsageTracker } from './oauth-usage.js';
+
+export { sdkUsage } from './oauth-usage.js';
 
 class SDKFailure extends Error {
   constructor(
@@ -45,13 +50,42 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function bashOutput(output: unknown): string {
+  if (typeof output === 'string') return output;
+  const response = record(output);
+  if (response.isImage) return 'Image output returned.';
+  const parts = [response.stdout, response.stderr].filter(
+    (value): value is string => typeof value === 'string' && value.length > 0,
+  );
+  if (typeof response.timedOutAfterMs === 'number')
+    parts.push(`Command timed out after ${Number(response.timedOutAfterMs) / 1000}s.`);
+  else if (response.interrupted) parts.push('Command interrupted.');
+  const exitCode = response.exitCode ?? response.exit_code;
+  if (typeof exitCode === 'number' && Number.isFinite(exitCode) && exitCode !== 0)
+    parts.push(`Exit status ${exitCode}.`);
+  if (Array.isArray(response.content)) {
+    for (const block of response.content) {
+      const content = record(block);
+      if (content.type === 'text' && typeof content.text === 'string') parts.push(content.text);
+    }
+  }
+  return parts.join('\n');
+}
+
 async function fileSnapshot(file: string): Promise<string | undefined> {
+  let handle;
   try {
-    if ((await stat(file)).size > 200_000) return undefined;
-    return await readFile(file, 'utf8');
+    handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK);
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > 200_000) return undefined;
+    const buffer = Buffer.alloc(200_001);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return bytesRead > 200_000 ? undefined : buffer.subarray(0, bytesRead).toString('utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
     return undefined;
+  } finally {
+    await handle?.close();
   }
 }
 
@@ -61,6 +95,13 @@ export async function oauthOptions(
 ): Promise<Options> {
   const approved = new Map<string, Approval>();
   const snapshots = new Map<string, { file: string; before: string }>();
+  const started = new Map<string, { name: string; at: number }>();
+  const activity = () => {
+    const active = [...started.values()][0];
+    ctx.ui.status(
+      active ? (started.size > 1 ? 'Running tools' : `Running ${active.name}`) : 'Thinking',
+    );
+  };
   const pre: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const args = record(input.tool_input);
@@ -83,6 +124,7 @@ export async function oauthOptions(
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Invalid tool path.';
       ctx.ui.notice(reason);
+      activity();
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
@@ -100,6 +142,7 @@ export async function oauthOptions(
         'tool',
         `${input.tool_name}: ${decision.reason ?? 'Permission denied.'}`,
       );
+      activity();
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
@@ -113,7 +156,8 @@ export async function oauthOptions(
       const before = await fileSnapshot(file);
       if (before !== undefined) snapshots.set(input.tool_use_id, { file, before });
     }
-    ctx.ui.status(`Running ${input.tool_name}`);
+    started.set(input.tool_use_id, { name: input.tool_name, at: Date.now() });
+    activity();
     return ctx.settings.permissionMode === 'full'
       ? {}
       : {
@@ -126,6 +170,32 @@ export async function oauthOptions(
     ctx.ui.idle();
     const output = input.hook_event_name === 'PostToolUse' ? input.tool_response : input.error;
     const text = typeof output === 'string' ? output : JSON.stringify(output);
+    const response = record(output);
+    const exitCode = response.exitCode ?? response.exit_code;
+    const isError =
+      input.hook_event_name === 'PostToolUseFailure' ||
+      response.isError === true ||
+      response.is_error === true ||
+      response.interrupted === true ||
+      typeof response.timedOutAfterMs === 'number' ||
+      (typeof exitCode === 'number' && Number.isFinite(exitCode) && exitCode !== 0);
+    const start = started.get(input.tool_use_id);
+    if (input.tool_name === 'Bash' || isError) {
+      if (!isError && response.backgroundTaskId) {
+        ctx.ui.notice('Bash is running in the background.');
+      } else {
+        ctx.ui.notice(
+          formatToolResult(
+            input.tool_name,
+            input.tool_name === 'Bash' ? bashOutput(output) : (text ?? ''),
+            {
+              isError,
+              durationMs: start === undefined ? undefined : Date.now() - start.at,
+            },
+          ),
+        );
+      }
+    }
     appendTranscript(
       ctx.session,
       'tool',
@@ -139,8 +209,9 @@ export async function oauthOptions(
     }
     snapshots.delete(input.tool_use_id);
     approved.delete(input.tool_use_id);
+    started.delete(input.tool_use_id);
     await ctx.checkpoint();
-    ctx.ui.status('Thinking');
+    activity();
     if (input.hook_event_name === 'PostToolUse') {
       const safeOutput: unknown = JSON.parse(
         JSON.stringify(output ?? null, (_key, value: unknown) =>
@@ -198,7 +269,10 @@ export async function oauthOptions(
     cwd: ctx.settings.cwd,
     model: ctx.settings.model,
     maxTurns: ctx.budget.remaining,
-    env: buildOAuthEnv(ctx.credential.secret),
+    env: {
+      ...buildOAuthEnv(ctx.credential.secret),
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+    },
     settingSources: [],
     mcpServers,
     strictMcpConfig: true,
@@ -236,19 +310,6 @@ export async function oauthOptions(
   };
 }
 
-export function sdkUsage(result: SDKResultMessage): UsageTotals {
-  const totals = emptyUsage();
-  for (const usage of Object.values(result.modelUsage)) {
-    totals.inputTokens += usage.inputTokens;
-    totals.outputTokens += usage.outputTokens;
-    totals.cacheReadTokens += usage.cacheReadInputTokens;
-    totals.cacheWriteTokens += usage.cacheCreationInputTokens;
-    if (usage.costBasis === 'unknown') totals.unpricedRequests++;
-  }
-  totals.costUsd = result.total_cost_usd;
-  return totals;
-}
-
 export function usageDifference(current: UsageTotals, previous = emptyUsage()): UsageTotals {
   return {
     inputTokens: Math.max(0, current.inputTokens - previous.inputTokens),
@@ -275,8 +336,9 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
     diagnostic = (diagnostic + stderrRedactor.write(text)).slice(-4000);
   };
   await ctx.onRequest();
+  const usage = new OAuthUsageTracker(ctx);
   ctx.ui.status('Thinking');
-  const stream = query({ prompt: prompt ?? portableContext(ctx.session), options });
+  let stream: Query | undefined;
   const streamed = new Set<string>();
   const seen = new Set<string>();
   let messageId = '';
@@ -284,12 +346,21 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
   let lastError: SDKFailure | undefined;
   let printed = false;
   let pendingText = '';
+  let waitingToRetry = false;
   try {
+    stream = query({ prompt: prompt ?? portableContext(ctx.session), options });
     for await (const message of stream) {
       if (message.type === 'system' && message.subtype === 'init') await ctx.checkpoint();
       if (message.type === 'stream_event') {
+        await usage.observe(message);
         const event = message.event;
-        if (event.type === 'message_start') messageId = event.message.id;
+        if (event.type === 'message_start') {
+          messageId = event.message.id;
+          if (waitingToRetry) {
+            waitingToRetry = false;
+            ctx.ui.status('Thinking');
+          }
+        }
         if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
           ctx.ui.text(event.delta.text);
           pendingText += event.delta.text;
@@ -328,22 +399,38 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
           'rate_limit_event',
           message.rate_limit_info,
         );
+      } else if (
+        message.type === 'system' &&
+        message.subtype === 'api_retry' &&
+        !seen.has(message.uuid)
+      ) {
+        seen.add(message.uuid);
+        const failure = Object.assign(new SDKFailure(message.error, message.error), {
+          status: message.error_status ?? undefined,
+        });
+        await ctx.onRetryError?.(failure);
+        await usage.retry();
+        ctx.ui.notice(
+          `Request retry ${message.attempt}/${message.max_retries} in ${(message.retry_delay_ms / 1000).toFixed(1)}s.`,
+        );
+        ctx.ui.status('Waiting to retry');
+        waitingToRetry = true;
+      } else if (
+        message.type === 'system' &&
+        message.subtype === 'task_started' &&
+        message.is_backgrounded
+      ) {
+        ctx.ui.notice('Background task started.');
+      } else if (message.type === 'system' && message.subtype === 'task_notification') {
+        ctx.ui.notice(
+          formatToolResult('Background task', message.summary, {
+            isError: message.status !== 'completed',
+            durationMs: message.usage?.duration_ms,
+          }),
+        );
       } else if (message.type === 'result') {
         gotResult = true;
-        const current = sdkUsage(message);
-        const delta = usageDifference(current);
-        if (
-          current.unpricedRequests &&
-          delta.inputTokens + delta.outputTokens + delta.cacheReadTokens + delta.cacheWriteTokens >
-            0
-        )
-          delta.unpricedRequests = current.unpricedRequests;
-        const requests = Math.max(1, message.num_turns);
-        delta.requests = requests;
-        delta.fastRequests = message.usage.speed === 'fast' ? requests : 0;
-        if (requests > 1) await ctx.onRequest(requests - 1);
-        await ctx.onUsage(delta);
-        ctx.budget.remaining -= requests;
+        ctx.budget.remaining -= await usage.finish(message);
         await ctx.checkpoint();
         if (message.is_error || message.subtype !== 'success') {
           throw (
@@ -358,6 +445,7 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
           ctx.ui.text(message.result);
           ctx.ui.endText();
           appendTranscript(ctx.session, 'assistant', message.result);
+          printed = true;
         }
       }
     }
@@ -369,12 +457,15 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
         )
       );
   } catch (error) {
+    const interrupted = await usage.interrupted();
+    ctx.budget.remaining -= interrupted.turns;
+    if (interrupted.hasTokens) ctx.ui.notice('Usage saved so far; final cost is unavailable.');
     if (pendingText)
       appendTranscript(ctx.session, 'assistant', `${pendingText}\n[Response interrupted.]`);
     if (ctx.signal.aborted) throw error;
     throw lastError ?? sdkDiagnosticError(error, diagnostic + stderrRedactor.flush());
   } finally {
-    stream.close();
+    stream?.close();
     ctx.signal.removeEventListener('abort', abort);
     ctx.ui.idle();
     ctx.ui.endText();

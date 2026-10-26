@@ -14,6 +14,9 @@ describe('usage accounting', () => {
     expect(usage.inputTokens).toBe(1000);
     expect(usage.cacheWriteTokens).toBe(3000);
     expect(usage.requests).toBe(1);
+    expect(formatUsage(usage)).toContain('1,000 uncached in');
+    expect(formatUsage(usage)).toContain('10,000 cache read');
+    expect(formatUsage(usage)).toContain('3,000 cache write');
   });
 
   it('uses the reported speed and current double-price fast mode', () => {

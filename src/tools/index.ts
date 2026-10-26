@@ -6,6 +6,7 @@ import { editText, listDirectory, readText, truncate, writeText } from './files.
 import { globFiles, grepFiles } from './search.js';
 import { runProcess } from './process.js';
 import { loadSkill } from '../skills.js';
+import { formatToolResult } from '../ui.js';
 
 export { toolDefinitions } from './definitions.js';
 
@@ -59,6 +60,24 @@ export class ToolRunner {
   constructor(private readonly options: { cwd: string; approve: Approve; ui: AgentUI }) {}
 
   async run(name: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
+    const started = Date.now();
+    try {
+      const result = await this.execute(name, input, signal);
+      if (name === 'bash' || result.is_error) {
+        this.options.ui.notice(
+          formatToolResult(name, result.content, {
+            isError: result.is_error,
+            durationMs: Date.now() - started,
+          }),
+        );
+      }
+      return result;
+    } finally {
+      this.options.ui.idle();
+    }
+  }
+
+  private async execute(name: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
     try {
       signal?.throwIfAborted();
       if (!Object.hasOwn(schemas, name)) throw new Error(`Unknown tool: ${name}`);
@@ -76,10 +95,10 @@ export class ToolRunner {
       const approval = await this.options.approve(name, value, signal);
       if (!approval.allowed) {
         const reason = approval.reason ?? `Permission denied for ${name}.`;
-        this.options.ui.notice(reason);
         throw new Error(reason);
       }
       signal?.throwIfAborted();
+      this.options.ui.status(`Running ${name}`);
       let content: string;
       switch (tool) {
         case 'skill': {
@@ -126,7 +145,7 @@ export class ToolRunner {
                 : `Exit code: ${result.exitCode}`;
           content = `${status}\nstdout:\n${result.stdout || '(empty)'}\nstderr:\n${result.stderr || '(empty)'}`;
           return {
-            content: truncate(redact(content)),
+            content: redact(content),
             is_error: result.aborted || result.timedOut || result.exitCode !== 0,
           };
         }

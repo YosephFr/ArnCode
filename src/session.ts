@@ -25,6 +25,7 @@ export interface Session {
   messages: MessageParam[];
   transcript: TranscriptEntry[];
   usage: UsageTotals;
+  peakContextTokens?: number;
 }
 
 export function newSession(settings: Settings): Session {

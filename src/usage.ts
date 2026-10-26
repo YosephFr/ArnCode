@@ -129,14 +129,13 @@ export function usageFromAPI(model: string, usage: ApiUsage, baseUrl?: string): 
 
 export function formatUsage(usage: UsageTotals): string {
   if (!usage.requests) return 'No usage yet.';
-  const input = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
   const parts = [
-    `${input.toLocaleString('en-US')} in`,
+    `${usage.inputTokens.toLocaleString('en-US')} uncached in`,
     `${usage.outputTokens.toLocaleString('en-US')} out`,
     `${usage.cacheReadTokens.toLocaleString('en-US')} cache read`,
     `${usage.cacheWriteTokens.toLocaleString('en-US')} cache write`,
   ];
-  if (usage.unpricedRequests === usage.requests) {
+  if (usage.unpricedRequests >= usage.requests) {
     parts.push('cost unavailable');
   } else {
     const cost =

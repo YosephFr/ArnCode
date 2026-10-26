@@ -274,7 +274,10 @@ describe('offline CLI journeys', () => {
         tool: {
           name: 'bash',
           id: 'record_cwd',
-          input: { command: "pwd > cwd.txt; printf 'shell\\n' >> greeting.txt" },
+          input: {
+            command:
+              "pwd > cwd.txt; printf 'shell\\n' >> greeting.txt; printf 'render complete\\n'",
+          },
         },
       },
       { text: ['Finished: ', 'sk-', 'ant-', 'cli-secret', ' verified.\n'] },
@@ -290,6 +293,9 @@ describe('offline CLI journeys', () => {
     expect(run.stderr).toContain('write_file greeting.txt');
     expect(run.stderr).toContain('-hello');
     expect(run.stderr).toContain('+hi');
+    expect(run.stderr).toContain('bash completed');
+    expect(run.stderr).toContain('Exit code: 0');
+    expect(run.stderr).toContain('render complete');
     expect(run.stderr).toContain('Turn:');
     expect(run.stderr).toContain('cost unavailable');
     expect(run.stdout + run.stderr).not.toContain('cli-secret');
@@ -324,12 +330,22 @@ describe('offline CLI journeys', () => {
     expect(api.requests[0]?.body.tools?.at(-1)).toMatchObject({
       cache_control: { type: 'ephemeral' },
     });
+    for (const request of api.requests) {
+      expect(JSON.stringify(request.body).match(/"cache_control":/g)).toHaveLength(3);
+      const latest = request.body.messages.at(-1);
+      expect(latest?.role).toBe('user');
+      expect(Array.isArray(latest?.content) && latest.content.at(-1)).toMatchObject({
+        cache_control: { type: 'ephemeral' },
+      });
+    }
     const sessions = await readdir(path.join(config, 'sessions'));
     expect(sessions).toHaveLength(1);
     const sessionFile = path.join(config, 'sessions', sessions[0]!);
     const before = await readFile(sessionFile, 'utf8');
+    expect(JSON.parse(before)).toMatchObject({ peakContextTokens: 70 });
     expect(before).not.toContain('cli-secret');
     expect(before).not.toContain('arncode-offline-test-key');
+    expect(before).not.toContain('cache_control');
     expect((await stat(sessionFile)).mode & 0o777).toBe(0o600);
 
     const resumed = await runCLI(api.url, ['--continue', '-p', 'Confirm the last change.']);
@@ -340,7 +356,16 @@ describe('offline CLI journeys', () => {
     expect(messages).toEqual(
       expect.arrayContaining([
         { role: 'user', content: 'Create and edit a greeting, then record the working directory.' },
-        { role: 'user', content: 'Confirm the last change.' },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Confirm the last change.',
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+        },
       ]),
     );
     expect(JSON.stringify(messages)).toContain('record_cwd');
@@ -348,6 +373,28 @@ describe('offline CLI journeys', () => {
     expect(JSON.stringify(messages)).not.toContain('cli-secret');
     expect(await readFile(path.join(project, 'greeting.txt'), 'utf8')).toBe('hi\nshell\n');
     expect(await readdir(path.join(config, 'sessions'))).toEqual(sessions);
+  }, 30_000);
+
+  it('shows shell failures in stderr even when the model does not mention them', async () => {
+    const api = await mockAPI([
+      {
+        tool: {
+          name: 'bash',
+          id: 'failed_render',
+          input: { command: "printf 'render failed\\n' >&2; exit 7" },
+        },
+      },
+      { text: ['Task stopped.\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Render the project.']);
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toBe('Task stopped.\n');
+    expect(run.stderr).toContain('bash failed');
+    expect(run.stderr).toContain('Exit code: 7');
+    expect(run.stderr).toContain('render failed');
+    expect(api.requests[1]?.body.messages.at(-1)).toMatchObject({
+      content: [{ tool_use_id: 'failed_render', is_error: true }],
+    });
   }, 30_000);
 
   it('denies non-TTY writes in ask mode and explains the denial independently of model text', async () => {

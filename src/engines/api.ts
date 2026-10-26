@@ -1,5 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Message, ToolResultBlockParam } from '@anthropic-ai/sdk/resources/messages';
+import type {
+  ContentBlockParam,
+  Message,
+  MessageParam,
+  ToolResultBlockParam,
+} from '@anthropic-ai/sdk/resources/messages';
 import { withRetry } from '../backoff.js';
 import { classifyCredentialFailure } from '../failures.js';
 import { appendTranscript, apiContext } from '../session.js';
@@ -15,6 +20,36 @@ export function apiClient(secret: string, baseURL?: string): Anthropic {
     baseURL,
     maxRetries: 0,
     timeout: 10 * 60_000,
+  });
+}
+
+export function cacheConversation(messages: MessageParam[]): MessageParam[] {
+  let latestUser = messages.length - 1;
+  while (latestUser >= 0 && messages[latestUser]?.role !== 'user') latestUser--;
+  return messages.map((message, index): MessageParam => {
+    if (message.role === 'system') return message;
+    if (typeof message.content === 'string') {
+      if (index !== latestUser || !message.content) return message;
+      return {
+        ...message,
+        content: [{ type: 'text', text: message.content, cache_control: { type: 'ephemeral' } }],
+      };
+    }
+    const content: ContentBlockParam[] = message.content.map((block) => ({
+      ...block,
+      cache_control: undefined,
+    }));
+    const last = content.at(-1);
+    if (
+      index === latestUser &&
+      last &&
+      last.type !== 'thinking' &&
+      last.type !== 'redacted_thinking' &&
+      (last.type !== 'text' || last.text)
+    ) {
+      content[content.length - 1] = { ...last, cache_control: { type: 'ephemeral' } };
+    }
+    return { ...message, content };
   });
 }
 
@@ -47,7 +82,8 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
                   ? { ...tool, cache_control: { type: 'ephemeral' as const } }
                   : tool,
               ),
-              messages: apiContext(session.messages),
+              // One moving message breakpoint plus system and tools: three total.
+              messages: cacheConversation(apiContext(session.messages)),
             },
             {
               signal,
@@ -83,7 +119,12 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
       ui.endText();
     }
 
-    await ctx.onUsage(usageFromAPI(message.model, message.usage, settings.baseUrl));
+    const usage = usageFromAPI(message.model, message.usage, settings.baseUrl);
+    session.peakContextTokens = Math.max(
+      session.peakContextTokens ?? 0,
+      usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens,
+    );
+    await ctx.onUsage(usage);
     if (partialText) appendTranscript(session, 'assistant', partialText);
     if (message.stop_reason === 'max_tokens') {
       // Never execute a potentially truncated tool call or reuse unsigned partial thinking.
