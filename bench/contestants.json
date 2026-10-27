@@ -1,0 +1,80 @@
+{
+  "unsetEnv": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_EFFORT",
+    "CLAUDE_PID",
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE"
+  ],
+  "contestants": [
+    {
+      "name": "arncode",
+      "command": [
+        "arncode",
+        "-p",
+        "{prompt}",
+        "--cwd",
+        "{dir}",
+        "--credential",
+        "{env:BENCH_ARNCODE_CREDENTIAL}"
+      ],
+      "version": ["arncode", "--version"],
+      "unsetEnv": ["ANTHROPIC_API_KEY"],
+      "usage": "arncode"
+    },
+    {
+      "name": "claude-code",
+      "command": [
+        "claude",
+        "-p",
+        "{prompt}",
+        "--output-format",
+        "json",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence"
+      ],
+      "version": ["claude", "--version"],
+      "env": { "DISABLE_AUTOUPDATER": "1" },
+      "unsetEnv": ["ANTHROPIC_API_KEY"],
+      "usage": "claude-code"
+    },
+    {
+      "name": "opencode",
+      "command": ["opencode", "run", "--format", "json", "--dir", "{dir}", "--auto", "{prompt}"],
+      "version": ["opencode", "--version"],
+      "env": { "OPENCODE_DISABLE_AUTOUPDATE": "1" },
+      "usage": "opencode"
+    },
+    {
+      "name": "codex",
+      "command": [
+        "codex",
+        "exec",
+        "--json",
+        "--cd",
+        "{dir}",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--ephemeral",
+        "--color",
+        "never",
+        "{prompt}"
+      ],
+      "version": ["codex", "--version"],
+      "usage": "codex"
+    },
+    {
+      "name": "mock",
+      "command": ["node", "{bench}/contestants/mock.mjs", "-p", "{prompt}", "--cwd", "{dir}"],
+      "version": ["node", "{bench}/contestants/mock.mjs", "--version"],
+      "usage": "arncode"
+    }
+  ]
+}

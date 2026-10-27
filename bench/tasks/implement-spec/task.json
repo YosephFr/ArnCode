@@ -1,0 +1,5 @@
+{
+  "prompt": "Implement `expandRanges` as described in SPEC.md. It will be checked against every rule in the spec.",
+  "timeoutSec": 600,
+  "check": ["node", "{task}/check.mjs"]
+}

@@ -9,4 +9,8 @@ export default tseslint.config(
     files: ['**/*.ts'],
     rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }] },
   },
+  {
+    files: ['bench/**/*.{js,mjs}'],
+    languageOptions: { globals: { console: 'readonly', process: 'readonly', URL: 'readonly' } },
+  },
 );

@@ -1,0 +1,5 @@
+{
+  "prompt": "The test suite in this project fails when run with `node --test`. Find the bug in the library code and fix it so every test passes. Do not change the tests.",
+  "timeoutSec": 600,
+  "check": ["node", "{task}/check.mjs"]
+}

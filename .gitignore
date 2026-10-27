@@ -7,5 +7,6 @@ coverage/
 *.log
 .arncode/
 credentials.json
+bench/results/
 .DS_Store
 .claude/

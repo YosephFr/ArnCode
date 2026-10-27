@@ -1,0 +1,5 @@
+{
+  "prompt": "Add a `--lines` option, with the short form `-l`, to the tally CLI in bin/tally.js. With it, tally prints line counts instead of word counts in the same output format, counting lines like `wc -l` (the number of newline characters). Without the option, the output stays the same. Add tests for the new option to the existing `node --test` suite.",
+  "timeoutSec": 600,
+  "check": ["node", "{task}/check.mjs"]
+}

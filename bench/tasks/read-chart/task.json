@@ -1,0 +1,5 @@
+{
+  "prompt": "Look at chart.png, a bar chart. Write the label of its tallest bar to a new file named answer.txt, containing only that label.",
+  "timeoutSec": 300,
+  "check": ["node", "{task}/check.mjs"]
+}
