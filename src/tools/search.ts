@@ -101,11 +101,12 @@ process.stdin.on('end', () => {
         const line = lines[index];
         const found = regex ? regex.test(line) : (ignoreCase ? line.toLocaleLowerCase() : line).includes(needle);
         if (!found) continue;
-        const text = file + ':' + (index + 1) + ':' + line + '\n';
+        const shown = line.length > 500 ? line.slice(0, 500) + ' [line truncated]' : line;
+        const text = file + ':' + (index + 1) + ':' + shown + '\n';
         process.stdout.write(text);
         length += text.length;
         matches++;
-        if (matches >= 1000 || length >= 48000) {
+        if (matches >= 1000 || length >= 40000) {
           process.stdout.write('[Search results truncated; narrow the query.]\n');
           return;
         }

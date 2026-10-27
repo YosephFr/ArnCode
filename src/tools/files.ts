@@ -16,7 +16,8 @@ import {
 } from './paths.js';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
-export const MAX_RESULT_CHARS = 48_000;
+export const MAX_RESULT_CHARS = 40_000;
+const MAX_LINE_CHARS = 2_000;
 
 export function truncate(value: string, limit = MAX_RESULT_CHARS): string {
   if (value.length <= limit) return value;
@@ -124,7 +125,9 @@ export async function readText(
         more = true;
         break;
       }
-      const rendered = `${lineNumber}: ${redact(line)}`;
+      const clamped =
+        line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)} [line truncated]` : line;
+      const rendered = `${lineNumber}: ${redact(clamped)}`;
       output.push(truncate(rendered, MAX_RESULT_CHARS - length));
       length += rendered.length + 1;
     }

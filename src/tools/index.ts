@@ -1,4 +1,7 @@
-import { realpath } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
 import type { AgentUI, Approve } from '../types.js';
 import { redact } from '../redact.js';
@@ -54,6 +57,24 @@ const schemas = {
 };
 
 export { schemas as toolSchemas };
+
+const OUTPUT_DIRECTORY = path.join(tmpdir(), `arncode-output-${process.getuid?.() ?? 'user'}`);
+let pruned = false;
+
+/** A private file for one command's complete output; logs older than a day are removed. */
+async function outputLogPath(): Promise<string> {
+  await mkdir(OUTPUT_DIRECTORY, { recursive: true, mode: 0o700 });
+  if (!pruned) {
+    pruned = true;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const name of await readdir(OUTPUT_DIRECTORY).catch(() => [])) {
+      const file = path.join(OUTPUT_DIRECTORY, name);
+      if (((await stat(file).catch(() => undefined))?.mtimeMs ?? Infinity) < cutoff)
+        await rm(file, { force: true });
+    }
+  }
+  return path.join(OUTPUT_DIRECTORY, `${randomUUID()}.log`);
+}
 
 // Tools without side effects can run concurrently within one model turn.
 const parallelSafe = new Set(['read_file', 'list_dir', 'glob', 'grep', 'skill']);
@@ -193,12 +214,14 @@ export class ToolRunner {
           break;
         case 'bash': {
           const { command, timeout_ms } = schemas.bash.parse(value);
+          const logFile = await outputLogPath();
           const result = await runProcess({
             command: 'bash',
             args: ['-c', command],
             cwd,
             timeoutMs: timeout_ms,
             signal,
+            logFile,
           });
           const status = result.aborted
             ? 'Cancelled'
@@ -208,6 +231,9 @@ export class ToolRunner {
                 ? `Stopped by ${result.signal}`
                 : `Exit code: ${result.exitCode}`;
           content = `${status}\nstdout:\n${result.stdout || '(empty)'}\nstderr:\n${result.stderr || '(empty)'}`;
+          if (result.truncated)
+            content += `\n[Full output saved to ${logFile}. Search it with grep or read parts with sed instead of running the command again.]`;
+          else await rm(logFile, { force: true });
           return {
             content: redact(content),
             is_error: result.aborted || result.timedOut || result.exitCode !== 0,

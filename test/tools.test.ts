@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -290,13 +290,20 @@ describe('shell tool', () => {
       command: `${quote(process.execPath)} -e ${quote('process.stdout.write("x".repeat(100000));process.stderr.write("end")')}`,
     });
     expect(large.is_error).toBe(false);
-    expect(large.content.length).toBeLessThan(49_000);
-    expect(large.content).toContain('Truncated');
+    expect(large.content.length).toBeLessThan(41_000);
+    expect(large.content).toContain('characters omitted');
     expect(large.content).toContain('stderr:\nend');
+    const saved = /Full output saved to (\S+?)\. /.exec(String(large.content))?.[1];
+    expect(saved).toBeDefined();
+    expect((await readFile(saved!, 'utf8')).length).toBe(100_003);
+    expect(((await stat(saved!)).mode & 0o777).toString(8)).toBe('600');
+    await rm(saved!, { force: true });
+    const small = await runner.run('bash', { command: 'echo short' });
+    expect(small.content).not.toContain('Full output saved');
     const both = await runner.run('bash', {
       command: `${quote(process.execPath)} -e ${quote('process.stdout.write("x".repeat(30000));process.stderr.write("y".repeat(30000)+"\\nFinal render error");process.exitCode=7')}`,
     });
-    expect(both.content.length).toBeLessThan(49_000);
+    expect(both.content.length).toBeLessThan(41_000);
     expect(both.content).toContain('Final render error');
     expect(ui.notice).toHaveBeenLastCalledWith(expect.stringContaining('Final render error'));
   });
@@ -342,5 +349,37 @@ describe('shell tool', () => {
     expect(result.content).not.toContain(secret);
     expect(result.content).not.toContain('example-tool-secret');
     expect(result.content).toContain('done');
+  });
+});
+
+describe('output budgets', () => {
+  it('clamps very long lines in reads and searches', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'arncode-lines-'));
+    try {
+      await writeFile(path.join(dir, 'bundle.js'), `start${'x'.repeat(10_000)}\nend\n`);
+      const runner = new ToolRunner({
+        cwd: dir,
+        approve: async () => ({ allowed: true }),
+        ui: {
+          text: () => {},
+          endText: () => {},
+          status: () => {},
+          idle: () => {},
+          notice: () => {},
+          progress: () => {},
+          tool: () => {},
+          diff: () => {},
+        },
+      });
+      const read = String((await runner.run('read_file', { path: 'bundle.js' })).content);
+      expect(read).toContain('[line truncated]');
+      expect(read).toContain('2: end');
+      expect(read.length).toBeLessThan(2_100);
+      const found = String((await runner.run('grep', { pattern: 'start' })).content);
+      expect(found).toContain('[line truncated]');
+      expect(found.length).toBeLessThan(600);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
