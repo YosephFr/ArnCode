@@ -61,6 +61,8 @@ export interface Session {
   checkpoints?: Checkpoint[];
   /** Notes for the model, sent with the next request. */
   notes?: string[];
+  /** The first request in the user's own words, for the session list. */
+  title?: string;
 }
 
 export function newSession(settings: Settings): Session {
@@ -195,7 +197,9 @@ export async function listSessions(
     summaries.push({
       id: session.id,
       updatedAt: session.updatedAt,
-      title: (prompts[0]!.text.split('\n').find((line) => line.trim()) ?? '').trim().slice(0, 80),
+      title: (session.title ?? prompts[0]!.text.split('\n').find((line) => line.trim()) ?? '')
+        .trim()
+        .slice(0, 80),
       prompts: prompts.length,
     });
   }

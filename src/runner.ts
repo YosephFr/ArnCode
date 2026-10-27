@@ -74,6 +74,8 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
     promptText = `<system-reminder>${session.notes.join('\n')}</system-reminder>\n\n${promptText}`;
     delete session.notes;
   }
+  // Hook output and notes go to the model; the session list shows what the user asked.
+  session.title ??= redact(options.prompt.split('\n').find((line) => line.trim()) ?? '').trim();
   const userPrompt = redact(promptText);
   appendTranscript(session, 'user', userPrompt);
   session.messages.push({ role: 'user', content: userPrompt });

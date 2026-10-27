@@ -16,6 +16,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { listSessions } from '../src/session.js';
 
 type MockBlock =
   | { type: 'text'; text: string[] }
@@ -569,6 +570,8 @@ describe('hooks', () => {
     expect(run.stdout).toBe('Done.\nAdded the test.\n');
     expect(JSON.stringify(api.requests[0]!.body.messages)).toContain('Context from hook');
     expect(JSON.stringify(api.requests[3]!.body.messages).split('Session context')).toHaveLength(2);
+    // The session list shows the request, not the hook output.
+    expect((await listSessions(project, config))[0]?.title).toBe('Clean up.');
     expect(api.requests[1]!.body.messages.at(-1)).toMatchObject({
       content: [
         {
