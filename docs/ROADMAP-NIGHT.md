@@ -114,3 +114,6 @@ An audit of the night's work found twelve defects, all fixed with regression tes
 - **D17. `~/.claude/CLAUDE.md` applies when `~/.arncode/AGENTS.md` does not exist**, as in OpenCode.
 - **D18. `/undo` covers write and edit tools for the last 20 requests**; changes made through shell commands are not tracked, as in Claude Code's rewind.
 - **D19. The comparison run waits for the owner.** It spends subscription quota on several accounts, so the harness, tasks and command are ready but the run is not started unasked.
+- **D20. ArnCode's own Git reads cannot run a repository's commands.** Every call turns off `core.fsmonitor` and refuses bare repositories found by searching, and the prompt no longer runs `git status`, whose filters a repository configures.
+- **D21. Shell allow rules are strict and deny rules are lenient.** Allow matches literally and asks about anything it cannot see whole; deny normalizes wrappers, quotes and nesting before matching. Neither is a sandbox, and the docs say so.
+- **D22. Path rules follow Claude Code's families and notation.** `Edit` covers writes, `Read` covers searches and listings (its deny rules become protected paths), and patterns follow `.gitignore` with `//` for absolute paths.
