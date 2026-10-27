@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   redact,
+  redactDeep,
   registerEnvironmentSecrets,
   registerSecret,
   StreamingRedactor,
@@ -23,6 +24,11 @@ describe('secret redaction', () => {
     expect(redact('Authorization: Bearer unregistered-sensitive-value')).toBe(
       'Authorization: Bearer [redacted]',
     );
+    // Inside JSON, masking each string keeps quotes and escapes intact.
+    expect(redactDeep({ command: 'curl -H "Authorization: Bearer $TOKEN" x', n: [1] })).toEqual({
+      command: 'curl -H "Authorization: Bearer [redacted]" x',
+      n: [1],
+    });
   });
 
   it('does not leak tokens at any streaming boundary', () => {

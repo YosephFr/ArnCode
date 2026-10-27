@@ -1,5 +1,5 @@
 import { structuredPatch } from 'diff';
-import { redact } from './redact.js';
+import { redact, redactDeep } from './redact.js';
 import type { Session } from './session.js';
 import type { AgentUI, TodoItem } from './types.js';
 import type { UsageTotals } from './usage.js';
@@ -56,7 +56,7 @@ export class JsonUI implements AgentUI {
 
   tool(name: string, input: Record<string, unknown>): void {
     this.endText();
-    this.emit({ type: 'tool_use', name, input: JSON.parse(redact(JSON.stringify(input))) });
+    this.emit({ type: 'tool_use', name, input: redactDeep(input) });
   }
 
   toolResult(
@@ -74,7 +74,7 @@ export class JsonUI implements AgentUI {
   }
 
   todos(items: TodoItem[]): void {
-    this.emit({ type: 'todos', items: JSON.parse(redact(JSON.stringify(items))) });
+    this.emit({ type: 'todos', items: redactDeep(items) });
   }
 
   diff(path: string, before: string, after: string): void {

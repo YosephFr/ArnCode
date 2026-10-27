@@ -28,6 +28,15 @@ export function redact(value: string): string {
     .replace(/\b(authorization\s*[:=]\s*(?:bearer|basic)\s+)[^\s"',;}]+/gi, '$1[redacted]');
 }
 
+/** Redact every string inside a JSON value, keeping its structure valid. */
+export function redactDeep<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value ?? null, (_key, item: unknown) =>
+      typeof item === 'string' ? redact(item) : item,
+    ),
+  ) as T;
+}
+
 export class StreamingRedactor {
   private pending = '';
   private hidingToken = false;

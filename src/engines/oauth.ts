@@ -16,7 +16,7 @@ import { createPathPolicy, projectPath } from '../tools/paths.js';
 import { ToolRunner, resultText, toolSchemas } from '../tools/index.js';
 import { discoverSkills, loadSkill } from '../skills.js';
 import { z } from 'zod';
-import { redact, registerSecret, StreamingRedactor } from '../redact.js';
+import { redact, redactDeep, registerSecret, StreamingRedactor } from '../redact.js';
 import type { Approval, TodoItem } from '../types.js';
 import type { EngineContext } from './types.js';
 import { OAuthUsageTracker, sdkUsage } from './oauth-usage.js';
@@ -249,11 +249,7 @@ export async function oauthOptions(
     await ctx.checkpoint();
     activity();
     if (input.hook_event_name === 'PostToolUse') {
-      const safeOutput: unknown = JSON.parse(
-        JSON.stringify(output ?? null, (_key, value: unknown) =>
-          typeof value === 'string' ? redact(value) : value,
-        ),
-      );
+      const safeOutput = redactDeep(output);
       const outcome = ctx.hooks?.has('PostToolUse')
         ? await ctx.hooks.run(
             'PostToolUse',
