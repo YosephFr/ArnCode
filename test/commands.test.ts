@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { expandCommand, loadCustomCommands, splitArguments } from '../src/commands/custom.js';
 import { DEFAULTS, readConfig } from '../src/config.js';
+import { loadHistory, saveHistory } from '../src/history.js';
 import { MeterStore } from '../src/metering.js';
 import { PermissionManager } from '../src/permissions.js';
 import { runTask } from '../src/runner.js';
@@ -200,5 +201,20 @@ describe('undo', () => {
       ui: { notice: (text: string) => notices.push(text) } as unknown as TerminalUI,
     });
     expect(notices.at(-1)).toContain('Nothing to undo');
+  });
+});
+
+describe('prompt history', () => {
+  it('keeps recalling the newest prompts as the file grows, and trims it', async () => {
+    const state = path.join(root, 'state');
+    await mkdir(state, { recursive: true });
+    const filler = `${JSON.stringify({ cwd: '/elsewhere', text: 'x'.repeat(1000) })}\n`;
+    await writeFile(path.join(state, 'history.jsonl'), filler.repeat(9000));
+    await saveHistory(project, 'run the tests', state);
+    await saveHistory(project, 'y'.repeat(200_000), state);
+    expect(await loadHistory(project, state)).toEqual(['run the tests']);
+    expect((await stat(path.join(state, 'history.jsonl'))).size).toBeLessThanOrEqual(
+      4 * 1024 * 1024,
+    );
   });
 });
