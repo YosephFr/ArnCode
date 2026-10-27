@@ -43,6 +43,7 @@ const userConfigSchema = z
     maxTurns: z.number().int().min(1).max(1000).optional(),
     compactAt: z.number().int().min(20_000).max(10_000_000).optional(),
     webTools: z.boolean().optional(),
+    oauthSessions: z.boolean().optional(),
     hooks: hooksSchema.optional(),
     mcpServers: mcpServersSchema.optional(),
     permissionMode: z.enum(['full', 'edits', 'ask', 'plan']).optional(),
@@ -71,6 +72,7 @@ export const DEFAULTS = {
   maxTurns: 80,
   compactAt: 200_000,
   webTools: true,
+  oauthSessions: true,
   permissionMode: 'full',
   protectedPaths: [...DEFAULT_PROTECTED_PATHS],
 } satisfies Omit<Settings, 'cwd'>;
@@ -142,6 +144,7 @@ export function resolveSettings(
     maxTurns:
       flags.maxTurns ?? envInteger(env.ARNCODE_MAX_TURNS) ?? config.maxTurns ?? DEFAULTS.maxTurns,
     webTools: flags.webTools ?? config.webTools ?? DEFAULTS.webTools,
+    oauthSessions: config.oauthSessions ?? DEFAULTS.oauthSessions,
     compactAt:
       flags.compactAt ??
       envInteger(env.ARNCODE_COMPACT_AT) ??

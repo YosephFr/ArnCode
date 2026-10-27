@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   HookCallback,
@@ -8,10 +8,10 @@ import type {
   SDKRateLimitInfo,
 } from '@anthropic-ai/claude-agent-sdk';
 import { buildOAuthEnv } from '../auth.js';
+import { getConfigDir } from '../config.js';
 import { appendTranscript, portableContext, transcriptText } from '../session.js';
 import { SUMMARY_INSTRUCTIONS } from '../summary.js';
-import { planModeReminder, subagentPrompt, systemPrompt } from '../prompt.js';
-import { emptyUsage, type UsageTotals } from '../usage.js';
+import { PLAN_MODE_OFF, planModeReminder, subagentPrompt, systemPrompt } from '../prompt.js';
 import { createPathPolicy, projectPath } from '../tools/paths.js';
 import { ToolRunner, resultText, toolSchemas } from '../tools/index.js';
 import { discoverSkills, loadSkill } from '../skills.js';
@@ -19,9 +19,9 @@ import { z } from 'zod';
 import { redact, registerSecret, StreamingRedactor } from '../redact.js';
 import type { Approval, TodoItem } from '../types.js';
 import type { EngineContext } from './types.js';
-import { OAuthUsageTracker } from './oauth-usage.js';
+import { OAuthUsageTracker, sdkUsage } from './oauth-usage.js';
 
-export { sdkUsage } from './oauth-usage.js';
+export { sdkUsage, usageDifference } from './oauth-usage.js';
 
 class SDKFailure extends Error {
   constructor(
@@ -88,6 +88,24 @@ async function fileSnapshot(file: string): Promise<string | undefined> {
   } finally {
     await handle?.close();
   }
+}
+
+/** The Agent SDK keeps its transcripts with ArnCode's state, out of the user's Claude Code history. */
+export function sdkConfigDir(): string {
+  return path.join(getConfigDir(), 'claude');
+}
+
+async function sdkThreadExists(id: string): Promise<boolean> {
+  if (!/^[\w-]{1,80}$/.test(id)) return false;
+  const projects = path.join(sdkConfigDir(), 'projects');
+  for (const folder of await readdir(projects).catch(() => [])) {
+    const found = await stat(path.join(projects, folder, `${id}.jsonl`)).then(
+      (info) => info.isFile(),
+      () => false,
+    );
+    if (found) return true;
+  }
+  return false;
 }
 
 export async function oauthOptions(
@@ -360,6 +378,7 @@ export async function oauthOptions(
     env: {
       ...buildOAuthEnv(ctx.credential.secret),
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+      CLAUDE_CONFIG_DIR: sdkConfigDir(),
     },
     settingSources: [],
     mcpServers,
@@ -431,6 +450,7 @@ export async function compactOAuth(ctx: EngineContext): Promise<boolean> {
   await runOAuth(
     ctx,
     `<conversation>\n${transcriptText(ctx.session)}\n</conversation>\n\n${SUMMARY_INSTRUCTIONS}`,
+    { detached: true },
   );
   const summary = ctx.session.transcript
     .slice(start)
@@ -441,37 +461,60 @@ export async function compactOAuth(ctx: EngineContext): Promise<boolean> {
   if (!summary) return false;
   ctx.session.transcript = [{ role: 'assistant', text: `[Conversation summary]\n${summary}` }];
   ctx.session.compactions = (ctx.session.compactions ?? 0) + 1;
+  // The next request starts a new SDK session from the summary.
+  delete ctx.session.oauth;
   await ctx.checkpoint();
   return true;
 }
 
-export function usageDifference(current: UsageTotals, previous = emptyUsage()): UsageTotals {
-  return {
-    inputTokens: Math.max(0, current.inputTokens - previous.inputTokens),
-    outputTokens: Math.max(0, current.outputTokens - previous.outputTokens),
-    cacheReadTokens: Math.max(0, current.cacheReadTokens - previous.cacheReadTokens),
-    cacheWriteTokens: Math.max(0, current.cacheWriteTokens - previous.cacheWriteTokens),
-    costUsd: Math.max(0, current.costUsd - previous.costUsd),
-    unpricedRequests: Math.max(0, current.unpricedRequests - previous.unpricedRequests),
-    requests: 0,
-    fastRequests: 0,
-  };
+export interface OAuthRun {
+  /** The newest user message, sent alone when the SDK session can be resumed. */
+  latest?: string;
+  /** A one-off request, such as a summary, outside the conversation's SDK session. */
+  detached?: boolean;
 }
 
-export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<void> {
+/**
+ * Run one request through the Agent SDK. While the credential stays the same, the SDK session is
+ * resumed so the model keeps its real history and the cached prefix; otherwise `prompt` (or the
+ * portable transcript) starts a new one.
+ */
+export async function runOAuth(
+  ctx: EngineContext,
+  prompt?: string,
+  run: OAuthRun = {},
+): Promise<void> {
   const { query } = await import('@anthropic-ai/claude-agent-sdk');
   const abortController = new AbortController();
   const abort = () => abortController.abort(ctx.signal.reason);
   ctx.signal.throwIfAborted();
   ctx.signal.addEventListener('abort', abort, { once: true });
   const options = await oauthOptions(ctx, abortController);
+  const thread = ctx.session.oauth;
+  const keep = !run.detached && ctx.settings.oauthSessions;
+  const resume =
+    keep &&
+    run.latest !== undefined &&
+    thread?.credential === ctx.credential.name &&
+    thread.totals !== undefined &&
+    (await sdkThreadExists(thread.id))
+      ? thread.id
+      : undefined;
+  if (keep) options.persistSession = true;
+  if (resume) options.resume = resume;
+  const planMode = ctx.settings.permissionMode === 'plan';
+  const reminder = planMode
+    ? planModeReminder(true)
+    : resume && thread?.planMode
+      ? PLAN_MODE_OFF
+      : undefined;
   const stderrRedactor = new StreamingRedactor();
   let diagnostic = '';
   options.stderr = (text) => {
     diagnostic = (diagnostic + stderrRedactor.write(text)).slice(-4000);
   };
   await ctx.onRequest();
-  const usage = new OAuthUsageTracker(ctx);
+  const usage = new OAuthUsageTracker(ctx, resume ? thread?.totals : undefined);
   ctx.ui.status('Thinking');
   let stream: Query | undefined;
   const streamed = new Set<string>();
@@ -483,17 +526,22 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
   let pendingText = '';
   let waitingToRetry = false;
   try {
-    const text = prompt ?? portableContext(ctx.session);
+    const text = resume ? run.latest! : (prompt ?? portableContext(ctx.session));
     stream = query({
-      prompt:
-        ctx.settings.permissionMode === 'plan'
-          ? `<system-reminder>${planModeReminder(true)}</system-reminder>\n\n${text}`
-          : text,
+      prompt: reminder ? `<system-reminder>${reminder}</system-reminder>\n\n${text}` : text,
       options,
     });
     for await (const message of stream) {
       if (message.type === 'rate_limit_event') ctx.onRateLimit?.(message.rate_limit_info);
-      if (message.type === 'system' && message.subtype === 'init') await ctx.checkpoint();
+      if (message.type === 'system' && message.subtype === 'init') {
+        if (keep)
+          ctx.session.oauth = {
+            id: message.session_id,
+            credential: ctx.credential.name,
+            ...(planMode ? { planMode } : {}),
+          };
+        await ctx.checkpoint();
+      }
       if (message.type === 'stream_event') {
         await usage.observe(message);
         const event = message.event;
@@ -572,6 +620,9 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
       } else if (message.type === 'result') {
         gotResult = true;
         ctx.budget.remaining -= await usage.finish(message);
+        // A resumed session reports totals since it began; keep them to bill the next request.
+        if (keep && ctx.session.oauth)
+          ctx.session.oauth.totals = { usage: sdkUsage(message), turns: message.num_turns };
         await ctx.checkpoint();
         if (message.is_error || message.subtype !== 'success') {
           throw (
@@ -598,6 +649,8 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
         )
       );
   } catch (error) {
+    // Without a final result the SDK's totals are unknown, so the next request starts afresh.
+    if (!gotResult && keep) delete ctx.session.oauth;
     const interrupted = await usage.interrupted();
     ctx.budget.remaining -= interrupted.turns;
     if (interrupted.hasTokens) ctx.ui.notice('Usage saved so far; final cost is unavailable.');

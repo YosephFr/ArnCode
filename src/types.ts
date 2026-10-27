@@ -28,6 +28,8 @@ export interface Settings {
   compactAt: number;
   /** Web search and fetch: server tools in API mode, native tools in OAuth mode. */
   webTools: boolean;
+  /** Let the Agent SDK keep OAuth conversations so follow-ups resume them. */
+  oauthSessions: boolean;
   permissionMode: PermissionMode;
   /** Terminal colors; `auto` follows the terminal's background. */
   theme?: 'auto' | 'dark' | 'light' | 'plain';

@@ -4,6 +4,20 @@ import type { EngineContext } from './types.js';
 
 const tokenFields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const;
 
+/** Usage added since `previous`, for totals the SDK keeps across a resumed session. */
+export function usageDifference(current: UsageTotals, previous = emptyUsage()): UsageTotals {
+  return {
+    inputTokens: Math.max(0, current.inputTokens - previous.inputTokens),
+    outputTokens: Math.max(0, current.outputTokens - previous.outputTokens),
+    cacheReadTokens: Math.max(0, current.cacheReadTokens - previous.cacheReadTokens),
+    cacheWriteTokens: Math.max(0, current.cacheWriteTokens - previous.cacheWriteTokens),
+    costUsd: Math.max(0, current.costUsd - previous.costUsd),
+    unpricedRequests: Math.max(0, current.unpricedRequests - previous.unpricedRequests),
+    requests: 0,
+    fastRequests: 0,
+  };
+}
+
 export function sdkUsage(result: SDKResultMessage): UsageTotals {
   const totals = emptyUsage();
   for (const usage of Object.values(result.modelUsage)) {
@@ -26,7 +40,11 @@ export class OAuthUsageTracker {
   private finalized = false;
   private finalTurns = 0;
 
-  constructor(private readonly ctx: Pick<EngineContext, 'onRequest' | 'onUsage' | 'session'>) {}
+  constructor(
+    private readonly ctx: Pick<EngineContext, 'onRequest' | 'onUsage' | 'session'>,
+    /** The SDK's running totals before this request, when it resumes a session. */
+    private readonly baseline?: { usage: UsageTotals; turns: number },
+  ) {}
 
   async retry(): Promise<void> {
     await this.ctx.onRequest();
@@ -60,23 +78,26 @@ export class OAuthUsageTracker {
       current.cacheWriteTokens,
       usage.cache_creation_input_tokens ?? 0,
     );
-    this.ctx.session.peakContextTokens = Math.max(
-      this.ctx.session.peakContextTokens ?? 0,
-      current.inputTokens + current.cacheReadTokens + current.cacheWriteTokens,
-    );
+    const input = current.inputTokens + current.cacheReadTokens + current.cacheWriteTokens;
+    this.ctx.session.peakContextTokens = Math.max(this.ctx.session.peakContextTokens ?? 0, input);
+    // Subagents run in their own context; the main thread's latest request sizes the conversation.
+    if (parent === null) this.ctx.session.contextTokens = input + current.outputTokens;
     await this.commit(this.observed());
   }
 
   async finish(result: SDKResultMessage): Promise<number> {
     const observed = this.observed();
-    const requests = Math.max(1, result.num_turns, this.messages.size);
+    const sdkTurns = Math.max(0, result.num_turns - (this.baseline?.turns ?? 0));
+    const requests = Math.max(1, sdkTurns, this.messages.size);
     if (!this.finalized) {
       const missing = Math.max(0, requests - this.messages.size - Number(this.reservedRequest));
       if (missing) await this.ctx.onRequest(missing);
     } else if (requests > this.finalTurns) {
       await this.ctx.onRequest(requests - this.finalTurns);
     }
-    const totals = sdkUsage(result);
+    const totals = this.baseline
+      ? usageDifference(sdkUsage(result), this.baseline.usage)
+      : sdkUsage(result);
     let incomplete = !Object.keys(result.modelUsage).length;
     for (const field of tokenFields) {
       if (totals[field] < observed[field]) incomplete = true;

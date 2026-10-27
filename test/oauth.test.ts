@@ -786,7 +786,7 @@ describe('OAuth usage and failure events', () => {
     expect(usageDifference(emptyUsage(), previous)).toEqual(emptyUsage());
   });
 
-  it('accounts for every fresh OAuth query and carries context without native session files', async () => {
+  it('accounts for every fresh OAuth query and carries context into a new SDK session', async () => {
     const ctx = await context();
     appendTranscript(ctx.session, 'user', 'Create hello.txt');
     sdk.query
@@ -809,8 +809,82 @@ describe('OAuth usage and failure events', () => {
     const secondQuery = sdk.query.mock.calls[1]?.[0];
     expect(secondQuery?.prompt).toContain('Create hello.txt');
     expect(secondQuery?.prompt).toContain('Done.');
-    expect(secondQuery?.options.persistSession).toBe(false);
+    expect(secondQuery?.options.persistSession).toBe(true);
     expect(secondQuery?.options.resume).toBeUndefined();
+  });
+
+  it('resumes the SDK session while the credential stays and bills only what it adds', async () => {
+    const ctx = await context({ permissionMode: 'plan' });
+    const state = join(ctx.settings.cwd, 'state');
+    vi.stubEnv('ARNCODE_CONFIG_DIR', state);
+    const init = {
+      type: 'system',
+      subtype: 'init',
+      session_id: 'sdk-thread',
+      uuid,
+    } as unknown as SDKMessage;
+    const cumulative = result({
+      num_turns: 2,
+      total_cost_usd: 0.018,
+      modelUsage: {
+        'claude-haiku-5-5': modelUsage({
+          inputTokens: 160,
+          outputTokens: 30,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 12,
+        }),
+      },
+    });
+    sdk.query
+      .mockReturnValueOnce(stream([init, result()]))
+      .mockReturnValueOnce(stream([init, result()]))
+      .mockReturnValueOnce(stream([init, cumulative]))
+      .mockReturnValueOnce(stream([init, result()]));
+    appendTranscript(ctx.session, 'user', 'Plan hello.txt');
+    await runOAuth(ctx, 'Plan hello.txt', { latest: 'Plan hello.txt' });
+    expect(ctx.session.oauth).toMatchObject({
+      id: 'sdk-thread',
+      credential: 'account',
+      planMode: true,
+    });
+    ctx.settings.permissionMode = 'full';
+    appendTranscript(ctx.session, 'user', 'Write it');
+    // Without the SDK's transcript on disk there is nothing to resume.
+    await runOAuth(ctx, 'portable context', { latest: 'Write it' });
+    expect(sdk.query.mock.calls[1]?.[0]).toMatchObject({ prompt: 'portable context' });
+    ctx.session.oauth!.planMode = true;
+    const thread = join(state, 'claude', 'projects', 'project', 'sdk-thread.jsonl');
+    await mkdir(join(thread, '..'), { recursive: true });
+    await writeFile(thread, '{}\n');
+    vi.mocked(ctx.onUsage).mockClear();
+    await runOAuth(ctx, 'portable context', { latest: 'Write it' });
+    const resumed = sdk.query.mock.calls[2]?.[0];
+    expect(resumed?.prompt).toMatch(/^<system-reminder>Plan mode is off.*\n\nWrite it$/s);
+    expect(resumed?.options).toMatchObject({
+      resume: 'sdk-thread',
+      persistSession: true,
+      env: { CLAUDE_CONFIG_DIR: join(state, 'claude') },
+    });
+    const billed = vi
+      .mocked(ctx.onUsage)
+      .mock.calls.map(([usage]) => usage)
+      .reduce(addUsage);
+    expect(billed).toMatchObject({
+      inputTokens: 60,
+      outputTokens: 10,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 2,
+      requests: 1,
+    });
+    expect(billed.costUsd).toBeCloseTo(0.008);
+    expect(ctx.session.oauth).toMatchObject({ totals: { turns: 2 } });
+    expect(ctx.session.oauth?.planMode).toBeUndefined();
+    // Another credential cannot continue that SDK session.
+    await runOAuth({ ...ctx, credential: { ...ctx.credential, name: 'other' } }, 'portable', {
+      latest: 'Next',
+    });
+    expect(sdk.query.mock.calls[3]?.[0]).toMatchObject({ prompt: 'portable' });
+    expect(sdk.query.mock.calls[3]?.[0].options.resume).toBeUndefined();
   });
 
   it('preserves a subscription reset when a later assistant error repeats the limit', async () => {

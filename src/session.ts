@@ -26,6 +26,16 @@ export interface ApiConversation {
   tools?: string[];
 }
 
+/** The Agent SDK session holding an OAuth conversation, resumed while the credential stays. */
+export interface OAuthThread {
+  id: string;
+  credential: string;
+  /** Whether the model was last told that plan mode is on. */
+  planMode?: boolean;
+  /** The SDK's running totals for the session after its last completed request. */
+  totals?: { usage: UsageTotals; turns: number };
+}
+
 export interface Session {
   version: 1;
   id: string;
@@ -42,6 +52,7 @@ export interface Session {
   /** Tokens the next request would carry, from the latest response. */
   contextTokens?: number;
   api?: ApiConversation;
+  oauth?: OAuthThread;
   compactions?: number;
   /** The latest checklist the agent wrote. */
   todos?: TodoItem[];
@@ -196,6 +207,7 @@ export function switchEngine(session: Session, engine: AuthMode): void {
   session.engine = engine;
   session.messages = [{ role: 'user', content: portableContext(session) }];
   delete session.api;
+  delete session.oauth;
   delete session.contextTokens;
 }
 

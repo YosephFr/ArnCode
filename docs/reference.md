@@ -149,7 +149,7 @@ OAuth uses `query()` from `@anthropic-ai/claude-agent-sdk`. Obtain a long-lived 
 
 ArnCode strips `ANTHROPIC_API_KEY`, competing Anthropic settings, and provider-selection variables from the SDK child environment before supplying the selected token. OAuth tokens are never sent directly to the Messages API. Custom API base URLs apply only to API-key mode.
 
-Native SDK session logging is disabled. ArnCode stores a redacted transcript and uses it as context when continuing an OAuth conversation. SDK background tasks are disabled; shell work runs in the foreground.
+The Agent SDK keeps each OAuth conversation in `~/.arncode/claude` (private files, apart from your Claude Code history), so a follow-up resumes it: the model keeps its full history, and the request reads that history from the cache instead of sending it again. After a credential switch, an interruption, or a summary, ArnCode continues from its own redacted transcript in a new SDK session. Set `"oauthSessions": false` to keep no SDK session files; follow-ups then resend the redacted transcript. SDK background tasks are disabled; shell work runs in the foreground.
 
 ## Configuration and storage
 
@@ -164,6 +164,7 @@ Settings resolve in this order: command-line flags, environment variables, `~/.a
   "maxTurns": 80,
   "compactAt": 200000,
   "webTools": true,
+  "oauthSessions": true,
   "permissionMode": "full",
   "theme": "auto"
 }

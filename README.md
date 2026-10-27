@@ -137,7 +137,7 @@ Always-applicable instructions come from global `~/.arncode/AGENTS.md` and the p
 
 Credentials, preferences, usage, and saved conversations live under `~/.arncode`, outside the project. The directory uses mode `700`; private JSON files use mode `600` and atomic writes. `ARNCODE_CONFIG_DIR` selects another location outside Git repositories.
 
-Registered secrets and Anthropic token patterns are redacted from output and saved conversations. Native SDK session logging is disabled; OAuth resumes from ArnCode's redacted transcript. OAuth also records streamed token usage before completion and reconciles it with the final SDK result; interrupted runs retain observed tokens with cost unavailable.
+Registered secrets and Anthropic token patterns are redacted from output and saved conversations. OAuth conversations are also kept by the Agent SDK in `~/.arncode/claude`, private to your account but not redacted, so follow-up requests resume them from the cache; set `"oauthSessions": false` to keep no SDK session files and resend ArnCode's redacted transcript instead. OAuth also records streamed token usage before completion and reconciles it with the final SDK result; interrupted runs retain observed tokens with cost unavailable.
 
 File and search tools exclude protected paths in both auth modes. Defaults cover `~/.arncode`, `~/.secrets`, `~/.ssh`, `**/.env`, and `**/.env.*`, including `.env.example`. Add project-relative paths or patterns with `protectedPaths` in configuration; defaults and the active state directory remain protected. See [protected paths](docs/reference.md#protected-paths) for matching rules. Shell commands still have your account's access; these exclusions are not a sandbox.
 

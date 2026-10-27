@@ -125,7 +125,7 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
           tried > 0 || changedEngine || session.transcript.length > 1
             ? portableContext(session)
             : userPrompt;
-        await engines.oauth(ctx, prompt);
+        await engines.oauth(ctx, prompt, { latest: userPrompt });
       }
       // A Stop hook that exits with code 2 sends the agent back to work, a bounded number of times.
       for (let round = 0; round < 3 && hooks.has('Stop'); round++) {
@@ -136,7 +136,7 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
         appendTranscript(session, 'user', request);
         session.messages.push({ role: 'user', content: request });
         if (credential.type === 'api-key') await engines['api-key'](ctx);
-        else await engines.oauth(ctx, portableContext(session));
+        else await engines.oauth(ctx, portableContext(session), { latest: request });
       }
       if (options.ignoreCooldown) await meter.reset(credential);
       await save(session);
