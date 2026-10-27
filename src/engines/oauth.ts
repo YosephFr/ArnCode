@@ -541,6 +541,8 @@ export async function runOAuth(
       }
       if (message.type === 'stream_event') {
         await usage.observe(message);
+        // A subagent's own messages are its work, not the reply; only its report comes back.
+        if (message.parent_tool_use_id !== null) continue;
         const event = message.event;
         if (event.type === 'message_start') {
           messageId = event.message.id;
@@ -556,7 +558,11 @@ export async function runOAuth(
           printed = true;
         }
         if (event.type === 'message_stop') ctx.ui.endText();
-      } else if (message.type === 'assistant' && !seen.has(message.uuid)) {
+      } else if (
+        message.type === 'assistant' &&
+        message.parent_tool_use_id === null &&
+        !seen.has(message.uuid)
+      ) {
         seen.add(message.uuid);
         const text = message.message.content
           .filter((b) => b.type === 'text')

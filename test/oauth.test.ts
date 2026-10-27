@@ -813,6 +813,36 @@ describe('OAuth usage and failure events', () => {
     expect(secondQuery?.options.resume).toBeUndefined();
   });
 
+  it('keeps subagent messages out of the reply and the transcript', async () => {
+    const ctx = await context();
+    const assistant = (text: string, parent: string | null, n: number) =>
+      ({
+        type: 'assistant',
+        uuid: `11111111-1111-4111-8111-11111111111${n}`,
+        session_id: 'sdk-thread',
+        parent_tool_use_id: parent,
+        message: { id: `m${n}`, content: [{ type: 'text', text }] },
+      }) as unknown as SDKMessage;
+    sdk.query.mockReturnValueOnce(
+      stream([
+        assistant('Delegating the search.', null, 1),
+        assistant('Subagent scratch work.', 'toolu_agent', 2),
+        assistant('The bug is in lib/b.ts.', null, 3),
+        result({ result: 'The bug is in lib/b.ts.' }),
+      ]),
+    );
+    await runOAuth(ctx, 'Find the bug');
+    const printed = vi
+      .mocked(ctx.ui.text)
+      .mock.calls.map(([text]) => text)
+      .join('');
+    expect(printed).not.toContain('Subagent scratch');
+    expect(ctx.session.transcript.map((entry) => entry.text).join('\n')).not.toContain(
+      'Subagent scratch',
+    );
+    expect(printed).toContain('The bug is in lib/b.ts.');
+  });
+
   it('resumes the SDK session while the credential stays and bills only what it adds', async () => {
     const ctx = await context({ permissionMode: 'plan' });
     const state = join(ctx.settings.cwd, 'state');
