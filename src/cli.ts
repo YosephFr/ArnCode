@@ -662,7 +662,11 @@ program.action(async (options: CliOptions) => {
         app.render();
         if (typeof result !== 'object') continue;
         ui.user(trimmed);
-        await execute(result.prompt);
+        // Only what the user typed after the command can attach files, never its template.
+        await execute(
+          result.prompt,
+          trimmed.includes(' ') ? trimmed.slice(trimmed.indexOf(' ') + 1) : '',
+        );
         void indexFiles();
         continue;
       }
