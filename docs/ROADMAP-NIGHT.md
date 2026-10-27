@@ -89,7 +89,7 @@ An audit of the night's work found twelve defects, all fixed with regression tes
 | 7.5 | Approval previews for edits; plans rendered as Markdown                                    | done   |
 | 7.6 | Permission rules for commands and paths, kept across sessions                              | done   |
 | 7.7 | First run: offer `claude setup-token` when Claude Code is installed                        | done   |
-| 7.8 | Project `.mcp.json` after a one-time trust prompt                                          | todo   |
+| 7.8 | Project `.mcp.json` after a one-time trust prompt                                          | done   |
 | 7.9 | Larger benchmark tasks; a published comparison run                                         | todo   |
 
 ## Decisions
@@ -102,7 +102,7 @@ An audit of the night's work found twelve defects, all fixed with regression tes
 - **D6. Edits match in three tiers only**: exact, typographic variants, trailing whitespace, with line endings kept per line (adapted from OpenCode, MIT). Looser fuzzy matching deleted content in OpenCode and was removed there.
 - **D7. Re-encoded images stay under 700 KB**: JPEG quality 85, 75, then 60, then smaller dimensions, because every image is resent with each request until a summary drops it.
 - **D8. Plan mode is enforced by the tools**, not only the prompt: read-only tools run, writes are limited to plan files, and shell commands need approval.
-- **D9. Hooks and MCP servers load from the user's configuration only.** Project files never run commands, so opening a repository cannot execute anything.
+- **D9. Hooks load from the user's configuration only; project MCP servers need trust.** Project files never run commands on their own: a project's `.mcp.json` starts only after the user approves that exact file.
 - **D10. Read-only explorer subagents default to Claude Haiku 5.5 at low effort** on the official endpoint (`ARNCODE_EXPLORE_MODEL` overrides); general subagents use the session model.
 - **D11. OAuth resumes the SDK session; the process still starts per prompt.** Measured on Claude Haiku 5.5: a resumed follow-up wrote 140 tokens to the cache and read 11.5k, where resending the transcript wrote about 2.7k and sent 2.3k uncached, and the gap grows with the conversation. The SDK reports totals across a resumed session, so each request is billed by difference, and a request without a final result drops the thread. SDK files live in `~/.arncode/claude`; `"oauthSessions": false` restores the transcript-only behavior. A trivial prompt takes about 2.8 s, of which about 1 s is the SDK process starting; `prewarm` is alpha and fixes hooks, MCP servers, the environment and the permission callback up front, all of which ArnCode binds to each request and credential, so it waits.
 - **D12. Web tools are on by default** in both modes, with `"webTools": false` to turn them off; Haiku and Fable skip the server tools they do not support.

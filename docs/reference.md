@@ -227,7 +227,9 @@ Connect Model Context Protocol servers by adding them to `~/.arncode/config.json
 }
 ```
 
-Stdio servers start in the project directory; `http` and `sse` servers are reached over the network. Their tools appear to the model as `mcp__<server>__<tool>` in both auth modes and follow the permission mode, hooks, and redaction like built-in tools; registered secrets in `env` and `headers` are redacted. API-key sessions start the servers on the first request and keep them for the session; a server that fails to start is reported once and skipped. `/mcp` lists servers and their tools. Like hooks, servers load from your configuration only, never from a project's own files.
+Stdio servers start in the project directory; `http` and `sse` servers are reached over the network. Their tools appear to the model as `mcp__<server>__<tool>` in both auth modes and follow the permission mode, hooks, and redaction like built-in tools; registered secrets in `env` and `headers` are redacted. API-key sessions start the servers on the first request and keep them for the session; a server that fails to start is reported once and skipped. `/mcp` lists servers and their tools.
+
+A project can share servers in a `.mcp.json` at its root, in the same format; `${NAME}` and `${NAME:-default}` take values from your environment, so the file needs no secrets. Because these servers run commands, ArnCode asks once before starting them and remembers the answer for that exact file; any change asks again, and runs without a terminal skip them. Servers in your own configuration win over the project's under the same name.
 
 ### Hooks
 

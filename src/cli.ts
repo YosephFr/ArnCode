@@ -17,6 +17,7 @@ import { compactSession, errorText, runTask } from './runner.js';
 import { SLASH_COMMANDS, slashCommand, type ReplState } from './repl.js';
 import { loadCustomCommands } from './commands/custom.js';
 import { closeMcp } from './mcp.js';
+import { isTrusted, projectMcp, trust } from './project-mcp.js';
 import {
   MODE_LABELS,
   currentPlanUsage,
@@ -234,6 +235,31 @@ program.action(async (options: CliOptions) => {
     } finally {
       input.close();
     }
+  }
+  // A project's .mcp.json can start commands, so its servers run only once you trust them here.
+  const project = await projectMcp(settings.cwd).catch((error: unknown) => {
+    ui.notice(errorText(error));
+    return undefined;
+  });
+  if (project) {
+    const names = Object.keys(project.servers).join(', ');
+    let trusted = await isTrusted(settings.cwd, project.digest);
+    if (!trusted && input.interactive && !oneShot) {
+      const answer = await input.question(
+        `This project's .mcp.json starts MCP servers: ${names}.\n  1. Start them\n  2. Not now\nChoose (2): `,
+      );
+      input.close();
+      if (answer?.trim() === '1') {
+        await trust(settings.cwd, project.digest);
+        trusted = true;
+      }
+    } else if (!trusted) {
+      ui.notice(
+        `Skipped this project's MCP servers (${names}); approve them in an interactive session.`,
+      );
+    }
+    // Servers in your own configuration win over the project's under the same name.
+    if (trusted) settings.mcpServers = { ...project.servers, ...settings.mcpServers };
   }
   if (options.resume === true && oneShot)
     throw new Error('Choose a session with --resume <id>, or use --continue.');

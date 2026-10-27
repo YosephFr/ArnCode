@@ -592,6 +592,29 @@ describe('hooks', () => {
 });
 
 describe('MCP servers', () => {
+  it("starts a project's .mcp.json servers only after they are trusted", async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url));
+    const definitions = { mcpServers: { local: { command: process.execPath, args: [fixture] } } };
+    await writeFile(path.join(project, '.mcp.json'), JSON.stringify(definitions));
+    const tools = (api: Awaited<ReturnType<typeof mockAPI>>) =>
+      (api.requests[0]?.body.tools ?? []).map((tool) => (tool as { name: string }).name);
+    const untrusted = await mockAPI([{ text: ['ok\n'] }]);
+    const skipped = await runCLI(untrusted.url, ['-p', 'Hi']);
+    expect(skipped.stderr).toContain("Skipped this project's MCP servers (local)");
+    expect(tools(untrusted)).not.toContain('mcp__local__echo');
+    const { projectMcp, trust } = await import('../src/project-mcp.js');
+    await trust(project, (await projectMcp(project))!.digest, config);
+    const trusted = await mockAPI([{ text: ['ok\n'] }]);
+    await runCLI(trusted.url, ['-p', 'Hi']);
+    expect(tools(trusted)).toContain('mcp__local__echo');
+    // Any change to the file needs approval again.
+    definitions.mcpServers.local.args.push('--changed');
+    await writeFile(path.join(project, '.mcp.json'), JSON.stringify(definitions));
+    const changed = await mockAPI([{ text: ['ok\n'] }]);
+    await runCLI(changed.url, ['-p', 'Hi']);
+    expect(tools(changed)).not.toContain('mcp__local__echo');
+  }, 30_000);
+
   it('keeps MCP tools in summary requests so they reuse the cached prefix', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url));
     await mkdir(config, { recursive: true });
