@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import type { AgentUI } from '../types.js';
 import { redact } from '../redact.js';
 import { prepareImage, probeImage, type PreparedImage } from '../images.js';
-import { matchEdit, nearbyLines, omissionPlaceholders } from './match.js';
+import { matchEdit, nearbyLines, omissionPlaceholders, replaceMatches } from './match.js';
 import {
   createPathPolicy,
   ensureDirectory,
@@ -226,12 +226,7 @@ export async function editText(
     );
   }
   const applied = input.replace_all ? matches : matches.slice(0, 1);
-  const after = applied
-    .reverse()
-    .reduce(
-      (content, match) => content.slice(0, match.start) + replace(match) + content.slice(match.end),
-      before,
-    );
+  const after = replaceMatches(before, applied, replace);
   if (Buffer.byteLength(after) > MAX_FILE_BYTES)
     throw new Error('Edited content exceeds the 5 MiB edit limit.');
   if (after === before)
@@ -270,4 +265,40 @@ export async function listDirectory(
   entries.sort((a, b) => a.localeCompare(b));
   if (more) entries.push('[Truncated after 1000 entries.]');
   return truncate(redact(entries.join('\n') || '[Empty directory]'));
+}
+
+/** The change a pending edit or write would make, so it can be shown before it is approved. */
+export async function proposedChange(
+  cwd: string,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ file: string; before: string; after: string } | undefined> {
+  const target =
+    typeof args.file_path === 'string'
+      ? args.file_path
+      : typeof args.path === 'string'
+        ? args.path
+        : undefined;
+  if (!target) return undefined;
+  const file = path.resolve(cwd, target);
+  const relative = path.relative(cwd, file);
+  const shown =
+    relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : file;
+  const info = await stat(file).catch(() => undefined);
+  if (info && (!info.isFile() || info.size > MAX_FILE_BYTES)) return undefined;
+  const before = info ? await readFile(file, 'utf8') : '';
+  if (['write_file', 'Write'].includes(name) && typeof args.content === 'string')
+    return { file: shown, before, after: args.content };
+  if (
+    ['edit_file', 'Edit'].includes(name) &&
+    typeof args.old_string === 'string' &&
+    typeof args.new_string === 'string'
+  ) {
+    const { matches, replace } = matchEdit(before, args.old_string, args.new_string);
+    const all = args.replace_all === true;
+    if (!matches.length || (matches.length > 1 && !all)) return undefined;
+    const after = replaceMatches(before, all ? matches : matches.slice(0, 1), replace);
+    return { file: shown, before, after };
+  }
+  return undefined;
 }

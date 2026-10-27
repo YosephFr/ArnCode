@@ -179,6 +179,8 @@ export class TerminalUI implements AgentUI {
   private progressLine = '';
   private activeTodo?: string;
   private markdown?: MarkdownStream;
+  /** The last change shown for approval, so applying it does not print the same diff again. */
+  private proposed?: { file: string; after: string };
 
   constructor(
     private readonly out: TerminalOutput = process.stdout,
@@ -247,8 +249,22 @@ export class TerminalUI implements AgentUI {
     this.endText();
     this.endProgress();
     const clean = terminalText(redact(text)).trimEnd();
-    if (this.app) this.emit(`\n${this.theme.strong('Plan')}\n${clean}\n`);
+    if (this.app)
+      this.app.print(`\n${this.theme.strong('Plan')}\n${this.markdownRows(clean).join('\n')}\n`);
     else this.err.write(`Plan\n${clean}\n`);
+  }
+
+  /** Show part of an earlier exchange when a conversation is resumed. */
+  history(role: 'user' | 'assistant', text: string): void {
+    if (!this.app) return;
+    if (role === 'user') this.user(text);
+    else this.app.print(`${this.markdownRows(terminalText(redact(text))).join('\n')}\n`);
+  }
+
+  /** Render a complete Markdown text, wrapped to the terminal. */
+  private markdownRows(text: string): string[] {
+    const markdown = new MarkdownStream(themeStyle(this.theme), () => this.width);
+    return [...text.split('\n').flatMap((line) => markdown.line(line)), ...markdown.end()];
   }
 
   /** Close a turn with its duration and cost, so the result of each request stays visible. */
@@ -415,6 +431,8 @@ export class TerminalUI implements AgentUI {
     this.idle();
     this.endText();
     this.endProgress();
+    // The plan itself is shown next, so a line for the tool would only repeat it.
+    if (name === 'exit_plan_mode' || name === 'ExitPlanMode') return;
     if (!this.app) {
       this.err.write(`${this.colors.cyan(toolSummary(name, input))}\n`);
       return;
@@ -462,7 +480,8 @@ export class TerminalUI implements AgentUI {
     );
   }
 
-  diff(file: string, before: string, after: string): void {
+  /** Show a change to a file; `proposed` previews one that still awaits approval. */
+  diff(file: string, before: string, after: string, options: { proposed?: boolean } = {}): void {
     this.idle();
     this.endText();
     this.endProgress();
@@ -472,7 +491,10 @@ export class TerminalUI implements AgentUI {
       return;
     }
     const name = terminalText(redact(file));
-    if (!before) {
+    const verb = options.proposed ? (before ? 'Change to' : 'New file') : 'Updated';
+    const seen = this.proposed?.file === file && this.proposed.after === redact(after);
+    this.proposed = options.proposed ? { file, after: redact(after) } : undefined;
+    if (!before && !options.proposed) {
       const lines = after.split('\n').length - (after.endsWith('\n') ? 1 : 0);
       this.emit(
         `  ${this.theme.muted('⎿')}  Created ${name} ${this.theme.muted(`· ${lines.toLocaleString()} lines`)}`,
@@ -481,7 +503,7 @@ export class TerminalUI implements AgentUI {
     }
     if (before.length + after.length > 400_000) {
       this.emit(
-        `  ${this.theme.muted('⎿')}  Updated ${name} ${this.theme.muted('· large file, diff omitted')}`,
+        `  ${this.theme.muted('⎿')}  ${verb} ${name} ${this.theme.muted('· large file, diff omitted')}`,
       );
       return;
     }
@@ -516,12 +538,13 @@ export class TerminalUI implements AgentUI {
         }
       }
     }
-    const shown =
-      rows.length > 40
+    const shown = seen
+      ? []
+      : rows.length > 40
         ? [...rows.slice(0, 40), this.theme.muted(`     … ${rows.length - 40} more lines`)]
         : rows;
     this.app.print(
-      `  ${this.theme.muted('⎿')}  Updated ${name} ${this.theme.success(`+${added}`)} ${this.theme.error(`-${removed}`)}\n${shown.join('\n')}\n`,
+      `  ${this.theme.muted('⎿')}  ${verb} ${name} ${this.theme.success(`+${added}`)} ${this.theme.error(`-${removed}`)}\n${shown.map((row) => `${row}\n`).join('')}`,
     );
   }
 

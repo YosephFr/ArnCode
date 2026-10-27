@@ -87,7 +87,7 @@ The default model is `claude-opus-5-5`, with adaptive thinking and medium effort
 The default `full` mode runs tools without prompts. Three other modes ask first:
 
 - `edits` applies file edits automatically and asks before shell commands.
-- `ask` (`--safe`, `--ask`) asks before every write, edit, and shell command.
+- `ask` (`--safe`, `--ask`) asks before every write, edit, and shell command, showing the change an edit would make.
 - `plan` (`--plan`) keeps the project read-only while the agent explores and proposes a plan; shell commands need approval. When you approve the plan, you choose the mode it continues in.
 
 Press Shift+Tab to cycle modes, or use `--permission-mode <mode>` and `/mode <mode>`. Approvals offer once, for the rest of the session, or no. Without a terminal, actions requiring approval are denied immediately.

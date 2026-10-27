@@ -69,7 +69,7 @@ Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt
 | `/usage`          | Show usage by credential                                     |
 | `/exit`           | Leave the session                                            |
 
-`/mode yolo` and `/mode default` select full access; `/mode safe` selects ask mode. Changing mode clears remembered session approvals. Without an interactive terminal, actions requiring approval are denied immediately with an explanation.
+`/mode yolo` and `/mode default` select full access; `/mode safe` selects ask mode. An approval for a write or edit first shows the change it would make. Changing mode clears remembered session approvals. Without an interactive terminal, actions requiring approval are denied immediately with an explanation.
 
 In plan mode, read-only tools run, file writes are limited to `.arncode/plans/`, and shell commands need approval. The agent presents its plan with `exit_plan_mode`; approving it chooses the mode for the work. Without a terminal, the plan is printed and the run stops.
 

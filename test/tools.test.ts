@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { proposedChange } from '../src/tools/files.js';
 import { ToolRunner } from '../src/tools/index.js';
 import { formatToolResult } from '../src/ui.js';
 import { createPathPolicy } from '../src/tools/paths.js';
@@ -424,5 +425,37 @@ describe('plan approval', () => {
     expect((await interactive.run('exit_plan_mode', { plan: 'x' })).content).toContain(
       'Use a migration instead.',
     );
+  });
+});
+
+describe('approval previews', () => {
+  it('shows the exact change an edit or write would make, in either engine', async () => {
+    await writeFile(path.join(directory, 'app.js'), "console.log('hello');\n");
+    // API tools use relative paths; OAuth tools pass absolute ones and Claude Code's names.
+    expect(
+      await proposedChange(directory, 'edit_file', {
+        path: 'app.js',
+        old_string: 'console.log(\u2018hello\u2019);',
+        new_string: "console.log('hello, world');",
+      }),
+    ).toEqual({
+      file: 'app.js',
+      before: "console.log('hello');\n",
+      after: "console.log('hello, world');\n",
+    });
+    expect(
+      await proposedChange(directory, 'Write', {
+        file_path: path.join(directory, 'notes/new.md'),
+        content: '# Notes\n',
+      }),
+    ).toEqual({ file: path.join('notes', 'new.md'), before: '', after: '# Notes\n' });
+    // An edit that would not apply has no preview, so the prompt falls back to the tool summary.
+    expect(
+      await proposedChange(directory, 'Edit', {
+        file_path: path.join(directory, 'app.js'),
+        old_string: 'missing',
+        new_string: 'x',
+      }),
+    ).toBeUndefined();
   });
 });

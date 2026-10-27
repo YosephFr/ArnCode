@@ -62,6 +62,15 @@ export function contextBudget(settings: Settings, session: Session): number {
     : window;
 }
 
+/** Stored plan limits without the windows that have reset since they were recorded. */
+export function currentPlanUsage(plan: PlanUsage | undefined, now = Date.now()): PlanUsage {
+  const current = (window?: PlanWindow) =>
+    window && (!window.resetsAt || window.resetsAt * 1000 > now) ? window : undefined;
+  const fiveHour = current(plan?.fiveHour);
+  const weekly = current(plan?.weekly);
+  return { ...(fiveHour ? { fiveHour } : {}), ...(weekly ? { weekly } : {}) };
+}
+
 export function statusLine(
   settings: Settings,
   session: Session,

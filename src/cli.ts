@@ -15,12 +15,20 @@ import { compactSession, errorText, runTask } from './runner.js';
 import { SLASH_COMMANDS, slashCommand, type ReplState } from './repl.js';
 import { loadCustomCommands } from './commands/custom.js';
 import { closeMcp } from './mcp.js';
-import { MODE_LABELS, planUsageFrom, statusLine, type PlanUsage } from './status.js';
+import {
+  MODE_LABELS,
+  currentPlanUsage,
+  planUsageFrom,
+  statusLine,
+  type PlanUsage,
+} from './status.js';
 import { InteractiveApp, type Suggestion } from './tui/app.js';
 import { themeFor } from './tui/theme.js';
 import { duration } from './tui/text.js';
 import { TerminalUI, displayName, setDisplayRoot, toolSummary } from './ui.js';
 import { formatUsage } from './usage.js';
+import { MeterStore } from './metering.js';
+import { proposedChange } from './tools/files.js';
 import { usageDifference } from './engines/oauth.js';
 import { JsonUI, type OutputFormat } from './json-output.js';
 import type { ExitPlan, PermissionMode, Settings } from './types.js';
@@ -208,7 +216,9 @@ program.action(async (options: CliOptions) => {
   ui.setTheme(theme);
   // Assigned once the session is ready; earlier callbacks see undefined and fall back.
   let app: InteractiveApp | undefined = undefined;
-  let previousMode: PermissionMode =
+  // The mode in effect when the user last pressed Enter; approving a plan offers it first, so
+  // modes passed through with Shift+Tab on the way to plan mode do not count.
+  let workingMode: PermissionMode =
     settings.permissionMode === 'plan' ? 'full' : settings.permissionMode;
   const permissions = new PermissionManager(
     settings.permissionMode,
@@ -216,8 +226,15 @@ program.action(async (options: CliOptions) => {
     async (name, args, signal) => {
       if (app) {
         const tool = displayName(name);
+        // The tool line is already on screen; show what an edit would change, then ask briefly.
+        const change = await proposedChange(settings.cwd, name, args).catch(() => undefined);
+        if (change) ui.diff(change.file, change.before, change.after, { proposed: true });
         const answer = await app.select(
-          `Allow ${toolSummary(tool, args)}?`,
+          ['bash', 'Bash'].includes(name)
+            ? 'Run this command?'
+            : change
+              ? 'Make this change?'
+              : `Allow ${toolSummary(tool, args)}?`,
           [
             { label: 'Yes', value: 'y', key: 'y' },
             {
@@ -241,8 +258,6 @@ program.action(async (options: CliOptions) => {
     settings.cwd,
   );
   const setMode = (next: PermissionMode) => {
-    if (next === 'plan' && settings.permissionMode !== 'plan')
-      previousMode = settings.permissionMode;
     settings.permissionMode = next;
     permissions.setMode(next);
     app?.render();
@@ -259,14 +274,20 @@ program.action(async (options: CliOptions) => {
         { label: 'Yes, asking before each change', value: 'ask' as PermissionMode },
         { label: 'No, keep planning', value: 'plan' as PermissionMode, key: 'n' },
       ],
-      Math.max(0, options.indexOf(previousMode)),
+      Math.max(0, options.indexOf(workingMode)),
       signal,
     );
     if (!choice || choice === 'plan') return { approved: false };
     setMode(choice);
     return { approved: true, mode: choice };
   };
-  let plan: PlanUsage = {};
+  // Last known plan limits for the account in use, until the first response refreshes them.
+  const knownCredential = session.credential ?? settings.pinnedCredential;
+  let plan: PlanUsage = knownCredential
+    ? currentPlanUsage(
+        (await new MeterStore().read().catch(() => undefined))?.credentials[knownCredential]?.plan,
+      )
+    : {};
   const setTheme = (preference: NonNullable<typeof settings.theme>) => {
     theme = themeFor(process.stderr, preference);
     app?.setTheme(theme);
@@ -448,9 +469,12 @@ program.action(async (options: CliOptions) => {
   ).catch(() => []);
   const replay = () => {
     for (const entry of state.session.transcript.filter((item) => item.role !== 'tool').slice(-2)) {
-      const lines = entry.text.split('\n').slice(0, 3).join('\n');
-      if (entry.role === 'user') ui.user(lines);
-      else app?.print(`${theme.muted(redact(lines))}\n`);
+      const lines = entry.text.split('\n');
+      const limit = entry.role === 'user' ? 3 : 12;
+      ui.history(
+        entry.role === 'user' ? 'user' : 'assistant',
+        `${lines.slice(0, limit).join('\n')}${lines.length > limit ? '\n…' : ''}`,
+      );
     }
   };
   Object.assign(state, {
@@ -541,6 +565,7 @@ program.action(async (options: CliOptions) => {
     while (!closing) {
       const line = await app.nextPrompt();
       if (line === undefined) break;
+      if (settings.permissionMode !== 'plan') workingMode = settings.permissionMode;
       const trimmed = line.trim();
       if (trimmed.startsWith('/')) {
         let result;

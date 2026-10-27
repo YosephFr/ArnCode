@@ -188,6 +188,20 @@ const OMISSION =
   /^\s*(?:\/\/|#|--|\/\*|<!--)?\s*[([]?\s*(?:\.\.\.\s*)?(?:rest of(?: the)? (?:code|file|method|methods|function|functions|class|implementation)|unchanged (?:code|lines|method|methods)|existing code(?: here)?|remaining (?:code|methods))\s*(?:\.\.\.|…)/i;
 
 /** Lines such as `// rest of code ...` that stand in for text the model left out. */
+/** Apply matches from `matchEdit` to the source, last first so offsets stay valid. */
+export function replaceMatches(
+  source: string,
+  matches: Match[],
+  replace: (match: Match) => string,
+): string {
+  return [...matches]
+    .reverse()
+    .reduce(
+      (content, match) => content.slice(0, match.start) + replace(match) + content.slice(match.end),
+      source,
+    );
+}
+
 export function omissionPlaceholders(text: string): string[] {
   return text
     .split(/\r?\n/)
