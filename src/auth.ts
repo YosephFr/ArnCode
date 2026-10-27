@@ -109,6 +109,33 @@ export async function addProfile(
   });
 }
 
+/** Anthropic API keys start with sk-ant-api; tokens from claude setup-token with sk-ant-oat. */
+export function detectCredentialType(secret: string): AuthMode | undefined {
+  const value = secret.trim();
+  if (value.startsWith('sk-ant-api')) return 'api-key';
+  if (value.startsWith('sk-ant-oat')) return 'oauth';
+  return undefined;
+}
+
+export async function renameProfile(
+  name: string,
+  next: string,
+  dir = getConfigDir(),
+): Promise<void> {
+  validateName(next);
+  const path = join(dir, 'credentials.json');
+  await withFileLock(path, async () => {
+    const bank = await readBank(dir);
+    const credential = bank.credentials.find((item) => item.name === name);
+    if (!credential) throw new Error(`Credential '${name}' was not found. Run arncode creds list.`);
+    if (bank.credentials.some((item) => item.name === next))
+      throw new Error(`Credential '${next}' already exists.`);
+    credential.name = next;
+    await atomicWriteJson(path, bank);
+    if ((await readConfig(dir)).profile === name) await writeConfig({ profile: next }, dir);
+  });
+}
+
 export async function listCredentials(dir = getConfigDir()): Promise<CredentialSummary[]> {
   return (await readBank(dir)).credentials
     .map(({ secret, ...metadata }) => ({ ...metadata, masked: `••••${secret.slice(-4)}` }))

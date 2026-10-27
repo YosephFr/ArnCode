@@ -7,6 +7,7 @@ import { redact } from './redact.js';
 import { addUsage, emptyUsage, type UsageTotals } from './usage.js';
 import { classifyCredentialFailure } from './failures.js';
 import type { Credential } from './auth.js';
+import type { PlanUsage } from './status.js';
 
 const count = z.number().nonnegative().finite();
 const recordSchema = z.object({
@@ -26,6 +27,14 @@ const recordSchema = z.object({
   resetAt: z.string().optional(),
   lastError: z.string().optional(),
   credentialVersion: z.string().optional(),
+  /** Latest subscription limits the Agent SDK reported for this credential. */
+  plan: z
+    .object({
+      fiveHour: z.object({ used: z.number(), resetsAt: z.number().optional() }).optional(),
+      weekly: z.object({ used: z.number(), resetsAt: z.number().optional() }).optional(),
+      updatedAt: z.string(),
+    })
+    .optional(),
 });
 const usageSchema = z.object({
   version: z.literal(1),
@@ -128,6 +137,36 @@ export class MeterStore {
       u.errors++;
       if (classifyCredentialFailure(error)) u.limitHits++;
       u.lastError = redact(error instanceof Error ? error.message : String(error)).slice(0, 1000);
+    });
+  }
+
+  async plan(credential: Credential, usage: PlanUsage): Promise<void> {
+    if (!usage.fiveHour && !usage.weekly) return;
+    await this.update(credential, (u) => {
+      u.plan = {
+        ...(usage.fiveHour
+          ? { fiveHour: { used: usage.fiveHour.used, resetsAt: usage.fiveHour.resetsAt } }
+          : u.plan?.fiveHour
+            ? { fiveHour: u.plan.fiveHour }
+            : {}),
+        ...(usage.weekly
+          ? { weekly: { used: usage.weekly.used, resetsAt: usage.weekly.resetsAt } }
+          : u.plan?.weekly
+            ? { weekly: u.plan.weekly }
+            : {}),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }
+
+  /** Keep a renamed credential's history under its new name. */
+  async rename(name: string, next: string): Promise<void> {
+    await withFileLock(this.file, async () => {
+      const data = await this.read();
+      if (!Object.hasOwn(data.credentials, name)) return;
+      data.credentials[next] = data.credentials[name]!;
+      delete data.credentials[name];
+      await atomicWriteJson(this.file, data);
     });
   }
 

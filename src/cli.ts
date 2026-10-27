@@ -4,7 +4,7 @@ import fg from 'fast-glob';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { credentialCommands, integer } from './commands/credentials.js';
-import { addProfile, loadCredentialCandidates } from './auth.js';
+import { addProfile, detectCredentialType, loadCredentialCandidates } from './auth.js';
 import { resolveConfiguration } from './config.js';
 import { loadHistory, saveHistory } from './history.js';
 import { TerminalInput, readStdin } from './input.js';
@@ -159,21 +159,24 @@ program.action(async (options: CliOptions) => {
   }
   if (!(await loadCredentialCandidates(settings)).length && input.interactive) {
     try {
-      const preferred = settings.authRestriction ?? 'api-key';
-      const typeAnswer =
-        settings.authRestriction ??
-        (await input.question(`Credential type [api-key/oauth] (${preferred}): `));
-      if (typeAnswer === undefined) return;
-      const type = typeAnswer.trim() || preferred;
-      if (type !== 'api-key' && type !== 'oauth') throw new Error('Choose api-key or oauth.');
-      const nameAnswer = await input.question('Credential name (main): ');
+      // The token says what it is, so the only other question is its name.
+      const secret = await input.secret(
+        'Paste an Anthropic API key, or a token from claude setup-token: ',
+      );
+      let type = settings.authRestriction ?? detectCredentialType(secret);
+      if (!type) {
+        const answer = await input.question(
+          'Is it an API key or an OAuth token? [api-key/oauth] (oauth): ',
+        );
+        if (answer === undefined) return;
+        type = (answer.trim() || 'oauth') as Settings['auth'];
+        if (type !== 'api-key' && type !== 'oauth') throw new Error('Choose api-key or oauth.');
+      }
+      const nameAnswer = await input.question('Name it (main): ');
       if (nameAnswer === undefined) return;
       const name = nameAnswer.trim() || 'main';
-      const secret = await input.secret(
-        type === 'oauth' ? 'Token from claude setup-token: ' : 'API key: ',
-      );
       await addProfile(name, type, secret);
-      ui.notice(`Added ${name}.`);
+      ui.notice(`Added ${name} (${type}).`);
     } finally {
       input.close();
     }

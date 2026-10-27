@@ -17,6 +17,7 @@ import { addUsage, emptyUsage, type UsageTotals } from './usage.js';
 import type { AgentUI, Approve, ExitPlan, Settings } from './types.js';
 import { redact } from './redact.js';
 import { Hooks } from './hooks.js';
+import { planUsageFrom } from './status.js';
 
 interface RunOptions {
   settings: Settings;
@@ -94,7 +95,10 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
       checkpoint: () => save(session),
       onRequest: (count) => meter.request(credential, count),
       onRetryError: (error) => meter.retry(credential, error),
-      onRateLimit: options.onRateLimit,
+      onRateLimit: (info) => {
+        options.onRateLimit?.(info);
+        void meter.plan(credential, planUsageFrom(info)).catch(() => undefined);
+      },
       onUsage: async (usage) => {
         turnUsage = addUsage(turnUsage, usage);
         session.usage = addUsage(session.usage, usage);

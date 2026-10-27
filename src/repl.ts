@@ -1,7 +1,13 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { writeConfig, type UserConfig } from './config.js';
-import { printCredentials, printUsage } from './commands/credentials.js';
+import {
+  credentialLines,
+  printCredentials,
+  printUsage,
+  testCredential,
+} from './commands/credentials.js';
+import { enableCredential, listCredentials, removeProfile, useProfile } from './auth.js';
 import { expandCommand, type CustomCommand } from './commands/custom.js';
 import { KNOWN_MODELS, MODEL_ALIASES, modelFeatures, resolveModel } from './models.js';
 import { referencedBytes } from './blobs.js';
@@ -38,7 +44,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: '/fast', usage: '[on|off]', description: 'Toggle fast mode' },
   { name: '/auth', usage: '[type|auto]', description: 'Choose api-key, oauth, or the mixed bank' },
   { name: '/cost', description: 'Show session usage' },
-  { name: '/creds', description: 'Show credential status' },
+  { name: '/creds', description: 'Manage credentials' },
   { name: '/usage', description: 'Show usage per credential' },
   { name: '/exit', description: 'Exit' },
 ];
@@ -127,9 +133,53 @@ export async function slashCommand(line: string, state: ReplState): Promise<Slas
     case '/cost':
       ui.notice(formatUsage(state.session.usage));
       break;
-    case '/creds':
-      await printCredentials(ui);
+    case '/creds': {
+      if (!state.select) {
+        await printCredentials(ui);
+        break;
+      }
+      const lines = await credentialLines();
+      if (!lines.length) {
+        ui.notice('No credentials. Run arncode creds add <name>.');
+        break;
+      }
+      const name = await state.select(
+        'Credentials',
+        lines.map((entry) => ({ label: entry.line, value: entry.name })),
+      );
+      if (!name) break;
+      const stored = (await listCredentials()).find((item) => item.name === name);
+      if (!stored) {
+        ui.notice(`${name} comes from the environment; change it there.`);
+        break;
+      }
+      const action = await state.select(name, [
+        { label: 'Prefer it for new requests', value: 'use' },
+        { label: stored.enabled ? 'Turn it off' : 'Turn it on', value: 'toggle' },
+        { label: 'Check it with a short request', value: 'test' },
+        { label: 'Remove it', value: 'remove' },
+      ]);
+      if (action === 'use') {
+        await useProfile(name);
+        settings.profile = name;
+        ui.notice(`New requests try ${name} first.`);
+      } else if (action === 'toggle') {
+        await enableCredential(name, !stored.enabled);
+        ui.notice(`${name} is ${stored.enabled ? 'off' : 'on'}.`);
+      } else if (action === 'test') {
+        await testCredential(name, ui);
+      } else if (action === 'remove') {
+        const sure = await state.select(`Remove ${name}? Its stored token is deleted.`, [
+          { label: 'Keep it', value: false },
+          { label: 'Remove it', value: true },
+        ]);
+        if (sure) {
+          await removeProfile(name);
+          ui.notice(`Removed ${name}.`);
+        }
+      }
       break;
+    }
     case '/usage':
       await printUsage(ui);
       break;

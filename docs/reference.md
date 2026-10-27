@@ -102,19 +102,21 @@ Large pastes are collapsed to one line in the input and sent in full.
 
 ## Credential commands
 
-| Command                        | Action                                                         |
-| ------------------------------ | -------------------------------------------------------------- |
-| `arncode creds add <name>`     | Add a credential from hidden input or stdin                    |
-| `arncode creds list`           | Show names, types, masked suffixes, priorities, and status     |
-| `arncode creds use <name>`     | Prefer an account while retaining failover                     |
-| `arncode creds remove <name>`  | Remove a stored credential                                     |
-| `arncode creds enable <name>`  | Include an account in selection                                |
-| `arncode creds disable <name>` | Exclude an account from selection                              |
-| `arncode creds test <name>`    | Make a tiny Haiku request with that credential                 |
-| `arncode creds usage`          | Show usage for each credential                                 |
-| `arncode creds stats`          | Show aggregate requests, tokens, costs, errors, and limit hits |
+| Command                             | Action                                                         |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `arncode creds add <name>`          | Add a credential from hidden input or stdin                    |
+| `arncode creds list`                | Show names, types, masked suffixes, priorities, and status     |
+| `arncode creds use <name>`          | Prefer an account while retaining failover                     |
+| `arncode creds priority <name> <n>` | Set the order; lower values are tried first                    |
+| `arncode creds rename <name> <new>` | Rename a credential, keeping its usage history                 |
+| `arncode creds remove <name>`       | Remove a stored credential                                     |
+| `arncode creds enable <name>`       | Include an account in selection                                |
+| `arncode creds disable <name>`      | Exclude an account from selection                              |
+| `arncode creds test <name>`         | Make a tiny Haiku request with that credential                 |
+| `arncode creds usage`               | Show usage for each credential                                 |
+| `arncode creds stats`               | Show aggregate requests, tokens, costs, errors, and limit hits |
 
-`creds add` accepts `--type api-key` or `--type oauth` (the default), and `--priority <integer>` (default: `0`). Lower priorities go first; equal priorities retain insertion order. For token input from a private file or password manager:
+`creds add` detects the type from the token (API keys and `claude setup-token` tokens look different); `--type api-key` or `--type oauth` sets it explicitly, and `--priority <integer>` sets the order (default: `0`). `creds list` and `/creds` show each credential's status, when a limited one is back, and the 5-hour and weekly plan use last reported for OAuth accounts. In an interactive session, `/creds` lets you prefer, turn off, check, or remove a credential. Lower priorities go first; equal priorities retain insertion order. For token input from a private file or password manager:
 
 ```sh
 arncode creds add work --type api-key < /path/to/private-token-file
