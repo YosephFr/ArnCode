@@ -362,7 +362,10 @@ program.action(async (options: CliOptions) => {
           turn.requests && turn.unpricedRequests < turn.requests && turn.costUsd >= 0.005
             ? `$${turn.costUsd.toFixed(2)}`
             : '';
-        ui.turnEnd(Date.now() - started, cost, failed);
+        const checkpoint = state.session.checkpoints?.at(-1);
+        const changed =
+          checkpoint && Date.parse(checkpoint.startedAt) >= started ? checkpoint.files.length : 0;
+        ui.turnEnd(Date.now() - started, cost, failed, changed);
       } else {
         ui.notice(`Turn: ${formatUsage(turn)}`);
         if (oneShot) ui.notice(`Session: ${formatUsage(state.session.usage)}`);

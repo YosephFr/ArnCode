@@ -6,6 +6,7 @@ import { getConfigDir } from './config.js';
 import { atomicWriteJson, readJson } from './storage.js';
 import { redact } from './redact.js';
 import { emptyUsage, type UsageTotals } from './usage.js';
+import type { Checkpoint } from './checkpoints.js';
 import type { AuthMode, Effort, Settings, TodoItem } from './types.js';
 
 export interface TranscriptEntry {
@@ -56,6 +57,10 @@ export interface Session {
   compactions?: number;
   /** The latest checklist the agent wrote. */
   todos?: TodoItem[];
+  /** File states before recent requests, newest last, for /undo. */
+  checkpoints?: Checkpoint[];
+  /** Notes for the model, sent with the next request. */
+  notes?: string[];
 }
 
 export function newSession(settings: Settings): Session {

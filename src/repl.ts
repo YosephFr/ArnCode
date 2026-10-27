@@ -11,8 +11,9 @@ import { enableCredential, listCredentials, removeProfile, useProfile } from './
 import { expandCommand, type CustomCommand } from './commands/custom.js';
 import { KNOWN_MODELS, MODEL_ALIASES, modelFeatures, resolveModel } from './models.js';
 import { referencedBytes } from './blobs.js';
+import { changedSince, lastCheckpoint, undoCheckpoint } from './checkpoints.js';
 import { connectMcp } from './mcp.js';
-import { newSession, type Session } from './session.js';
+import { newSession, saveSession, type Session } from './session.js';
 import { MODE_LABELS, contextBudget, type PlanUsage } from './status.js';
 import { compactNumber, duration } from './tui/text.js';
 import type { Choice } from './tui/select.js';
@@ -34,6 +35,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: '/effort', usage: '[level]', description: 'low, medium, high, xhigh, or max' },
   { name: '/mode', usage: '[mode]', description: 'full, edits, ask, or plan' },
   { name: '/plan', description: 'Plan before changing anything' },
+  { name: '/undo', description: 'Put back the files the last request changed' },
   { name: '/compact', description: 'Summarize the conversation to free context' },
   { name: '/context', description: 'Show context use' },
   { name: '/todos', description: 'Show the current checklist' },
@@ -280,6 +282,50 @@ export async function slashCommand(line: string, state: ReplState): Promise<Slas
       }
       ui.notice(`Effort: ${settings.effort}`);
       break;
+    case '/undo': {
+      const checkpoint = lastCheckpoint(state.session);
+      if (!checkpoint) {
+        ui.notice('Nothing to undo: no recent request changed files with the edit tools.');
+        break;
+      }
+      const names = checkpoint.files.map(
+        (entry) => path.relative(settings.cwd, entry.path) || entry.path,
+      );
+      const shown =
+        names.length > 3
+          ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`
+          : names.join(', ');
+      const edited = (await changedSince(checkpoint)).map(
+        (file) => path.relative(settings.cwd, file) || file,
+      );
+      if (state.select) {
+        const sure = await state.select(
+          `Undo “${checkpoint.prompt}”?${edited.length ? ` ${edited.join(', ')} changed since; those edits are lost too.` : ''}`,
+          [
+            { label: `Restore ${shown}`, value: true },
+            { label: 'Keep the changes', value: false },
+          ],
+        );
+        if (!sure) break;
+      }
+      const { restored, skipped } = await undoCheckpoint(state.session);
+      const list = (files: string[]) =>
+        files.map((file) => path.relative(settings.cwd, file) || file).join(', ');
+      if (restored.length)
+        (state.session.notes ??= []).push(
+          `The user undid your changes from the request "${checkpoint.prompt}". These files are back to how they were before it: ${list(restored)}.`,
+        );
+      await saveSession(state.session);
+      ui.notice(
+        [
+          restored.length ? `Restored ${list(restored)}.` : '',
+          skipped.length ? `Could not restore ${list(skipped)}: larger than 5 MB.` : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      );
+      break;
+    }
     case '/compact':
       if (!state.compact) throw new Error('Compaction is available in interactive sessions.');
       await state.compact();

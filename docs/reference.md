@@ -55,6 +55,7 @@ Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt
 | `/fast [on/off]`  | Toggle fast mode, or set `on` / `off`                        |
 | `/theme [name]`   | Choose `auto`, `dark`, `light`, or `plain` colors; saved     |
 | `/effort [level]` | Show or change effort                                        |
+| `/undo`           | Put back the files the latest request changed                |
 | `/compact`        | Summarize the conversation to free context                   |
 | `/context`        | Show context use and when the conversation is summarized     |
 | `/todos`          | Show the agent's current checklist                           |
@@ -68,6 +69,8 @@ Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt
 | `/creds`          | Show the credential bank                                     |
 | `/usage`          | Show usage by credential                                     |
 | `/exit`           | Leave the session                                            |
+
+`/undo` restores the files the agent wrote or edited in the latest request that changed any, newest first, for up to 20 requests; changes made through shell commands are not tracked. The agent is told about the undo with your next request.
 
 `/mode yolo` and `/mode default` select full access; `/mode safe` selects ask mode. An approval for a write or edit first shows the change it would make. Changing mode clears remembered session approvals. Without an interactive terminal, actions requiring approval are denied immediately with an explanation.
 

@@ -34,7 +34,8 @@ async function textFile(file: string): Promise<string> {
   return content;
 }
 
-async function atomicWrite(file: string, content: string): Promise<void> {
+/** Replace a file in one step, keeping its permissions. */
+export async function atomicWrite(file: string, content: string | Buffer): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
   const previous = await stat(file).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined;
@@ -45,7 +46,7 @@ async function atomicWrite(file: string, content: string): Promise<void> {
     const handle = await open(temporary, 'wx', previous ? previous.mode & 0o777 : 0o644);
     try {
       if (previous) await handle.chmod(previous.mode & 0o777);
-      await handle.writeFile(content, 'utf8');
+      await handle.writeFile(content);
     } finally {
       await handle.close();
     }
@@ -183,6 +184,7 @@ export async function writeText(
   input: { path: string; content: string },
   ui: AgentUI,
   policy?: PathPolicy,
+  beforeChange?: (file: string) => Promise<void>,
 ): Promise<string> {
   if (Buffer.byteLength(input.content) > MAX_FILE_BYTES)
     throw new Error('Content exceeds the 5 MiB write limit.');
@@ -191,6 +193,7 @@ export async function writeText(
     if (error.code === 'ENOENT') return '';
     throw error;
   });
+  await beforeChange?.(file);
   await atomicWrite(file, input.content);
   ui.diff(path.relative(cwd, file), redact(before), redact(input.content));
   return `Wrote ${path.relative(cwd, file)} (${Buffer.byteLength(input.content, 'utf8')} bytes).`;
@@ -201,6 +204,7 @@ export async function editText(
   input: { path: string; old_string: string; new_string: string; replace_all: boolean },
   ui: AgentUI,
   policy?: PathPolicy,
+  beforeChange?: (file: string) => Promise<void>,
 ): Promise<string> {
   const file = await projectPath(cwd, input.path, false, policy);
   const before = await textFile(file);
@@ -233,6 +237,7 @@ export async function editText(
     throw new Error(
       'The edit leaves the file unchanged. Line endings follow the file; write \\r explicitly to change them.',
     );
+  await beforeChange?.(file);
   await atomicWrite(file, after);
   ui.diff(path.relative(cwd, file), redact(before), redact(after));
   const count = applied.length;

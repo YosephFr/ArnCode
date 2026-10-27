@@ -1,10 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { expandCommand, loadCustomCommands, splitArguments } from '../src/commands/custom.js';
 import { DEFAULTS, readConfig } from '../src/config.js';
+import { MeterStore } from '../src/metering.js';
 import { PermissionManager } from '../src/permissions.js';
+import { runTask } from '../src/runner.js';
 import { SLASH_COMMANDS, slashCommand, type ReplState } from '../src/repl.js';
 import { appendTranscript, newSession } from '../src/session.js';
 import { createTheme } from '../src/tui/theme.js';
@@ -123,5 +125,77 @@ describe('session commands', () => {
     await expect(slashCommand('/theme neon', value)).rejects.toThrow('/theme auto');
     await slashCommand('/todos', value);
     expect(notices.at(-1)).toBe('No checklist in this conversation yet.');
+  });
+});
+
+describe('undo', () => {
+  it('puts back what a request changed and tells the model with the next request', async () => {
+    const settings = { ...DEFAULTS, cwd: project };
+    const session = newSession(settings);
+    const app = path.join(project, 'app.js');
+    const created = path.join(project, 'created.txt');
+    await writeFile(app, 'old\n');
+    let sent = '';
+    const run = (prompt: string, engine: Parameters<typeof runTask>[0]['engines']) =>
+      runTask({
+        settings,
+        session,
+        prompt,
+        ui: { notice: () => undefined, idle: () => undefined, endText: () => undefined } as never,
+        approve: async () => ({ allowed: true }),
+        signal: new AbortController().signal,
+        meter: new MeterStore(path.join(root, 'state')),
+        save: async () => undefined,
+        candidates: [
+          {
+            name: 'api',
+            type: 'api-key',
+            secret: 'fixture-key',
+            source: 'stored',
+            priority: 0,
+            enabled: true,
+            createdAt: '2026-10-27T00:00:00.000Z',
+          },
+        ],
+        engines: engine,
+      });
+    await run('Rename the greeting', {
+      'api-key': async (ctx) => {
+        await ctx.recordChange!(app);
+        await writeFile(app, 'new\n');
+        await ctx.recordChange!(created);
+        await writeFile(created, 'made\n');
+        // A second change in the same request keeps the content from before the request.
+        await ctx.recordChange!(app);
+        await writeFile(app, 'newer\n');
+      },
+      oauth: async () => undefined,
+    });
+    expect(session.checkpoints?.at(-1)?.files).toHaveLength(2);
+    const notices: string[] = [];
+    await slashCommand('/undo', {
+      settings,
+      session,
+      permissions: new PermissionManager('full', false, async () => 'n'),
+      ui: { notice: (text: string) => notices.push(text) } as unknown as TerminalUI,
+    });
+    expect(await readFile(app, 'utf8')).toBe('old\n');
+    await expect(stat(created)).rejects.toThrow();
+    expect(notices.at(-1)).toBe('Restored app.js, created.txt.');
+    await run('Try again', {
+      'api-key': async (ctx) => {
+        sent = JSON.stringify(ctx.session.messages.at(-1));
+      },
+      oauth: async () => undefined,
+    });
+    expect(sent).toContain('The user undid your changes from the request');
+    expect(session.checkpoints).toEqual([]);
+    await slashCommand('/undo', {
+      settings,
+      session,
+      permissions: new PermissionManager('full', false, async () => 'n'),
+      ui: { notice: (text: string) => notices.push(text) } as unknown as TerminalUI,
+    });
+    expect(notices.at(-1)).toContain('Nothing to undo');
   });
 });

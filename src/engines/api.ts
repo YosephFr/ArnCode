@@ -579,6 +579,7 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
     protectedPaths: settings.protectedPaths,
     allowedTools: session.api?.tools,
     hooks: ctx.hooks,
+    beforeChange: ctx.recordChange,
     ...(mcp ? { external: mcp } : {}),
     ...(session.api?.tools && !session.api.tools.includes('task')
       ? {}

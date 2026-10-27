@@ -23,6 +23,11 @@ export function isBlobRef(value: string): boolean {
   return value.startsWith(PREFIX);
 }
 
+/** SHA-256 of the bytes behind a reference. */
+export function blobDigest(ref: string): string {
+  return ref.split(':')[1] ?? '';
+}
+
 /** Bytes behind a reference, as recorded when it was stored. */
 export function blobSize(ref: string): number {
   return Number(ref.split(':')[2] ?? 0);
@@ -53,7 +58,7 @@ export async function storeBlob(
 async function loadBlob(sessionId: string, ref: string, dir: string): Promise<string> {
   const digest = ref.slice(PREFIX.length).split(':')[0] ?? '';
   if (!/^[a-f\d]{64}$/.test(digest))
-    throw new Error('The session contains an invalid image reference.');
+    throw new Error('The session contains an invalid file reference.');
   const cached = cache.get(digest);
   if (cached !== undefined) return cached;
   try {
@@ -64,11 +69,23 @@ async function loadBlob(sessionId: string, ref: string, dir: string): Promise<st
     return data;
   } catch (error) {
     if (isFileError(error, 'ENOENT'))
-      throw new Error('An image from this session is missing. Start a new session to continue.', {
-        cause: error,
-      });
+      throw new Error(
+        'A file stored with this session is missing. Start a new session to continue.',
+        {
+          cause: error,
+        },
+      );
     throw error;
   }
+}
+
+/** The bytes behind a reference stored for this session. */
+export async function readBlob(
+  sessionId: string,
+  ref: string,
+  dir = getConfigDir(),
+): Promise<Buffer> {
+  return Buffer.from(await loadBlob(sessionId, ref, dir), 'base64');
 }
 
 type MediaBlock = { type: string; source?: { type: string; data?: string } };

@@ -193,6 +193,7 @@ export async function oauthOptions(
     }
     if (['Write', 'Edit'].includes(input.tool_name) && typeof args.file_path === 'string') {
       const file = path.resolve(ctx.settings.cwd, args.file_path);
+      await ctx.recordChange?.(file);
       const before = await fileSnapshot(file);
       if (before !== undefined) snapshots.set(input.tool_use_id, { file, before });
     }

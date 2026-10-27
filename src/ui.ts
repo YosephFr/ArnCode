@@ -268,11 +268,14 @@ export class TerminalUI implements AgentUI {
   }
 
   /** Close a turn with its duration and cost, so the result of each request stays visible. */
-  turnEnd(milliseconds: number, cost: string, failed: boolean): void {
+  turnEnd(milliseconds: number, cost: string, failed: boolean, changedFiles = 0): void {
     if (!this.app) return;
     const mark = failed ? this.theme.error('✗') : this.theme.success('✓');
+    const files = changedFiles
+      ? ` · ${changedFiles} file${changedFiles === 1 ? '' : 's'} changed`
+      : '';
     this.emit(
-      `${mark} ${this.theme.muted(`${duration(milliseconds)}${cost ? ` · ${cost}` : ''}`)}`,
+      `${mark} ${this.theme.muted(`${duration(milliseconds)}${files}${cost ? ` · ${cost}` : ''}`)}`,
     );
   }
 

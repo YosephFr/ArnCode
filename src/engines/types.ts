@@ -25,4 +25,6 @@ export interface EngineContext {
   onRetryError?(error: unknown): Promise<void>;
   /** Subscription rate-limit details reported during an OAuth run. */
   onRateLimit?(info: unknown): void;
+  /** Keep a file's content before the agent changes it, so /undo can restore it. */
+  recordChange?(file: string): Promise<void>;
 }

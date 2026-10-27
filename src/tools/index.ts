@@ -178,6 +178,8 @@ export class ToolRunner {
       /** Tools this runner may execute; every tool when absent. */
       allowedTools?: readonly string[];
       hooks?: Hooks;
+      /** Called before a write or edit changes a file, so the change can be undone. */
+      beforeChange?: (file: string) => Promise<void>;
       /** Tools served elsewhere, such as MCP servers. */
       external?: {
         has(name: string): boolean;
@@ -336,10 +338,22 @@ export class ToolRunner {
           break;
         }
         case 'write_file':
-          content = await writeText(cwd, schemas.write_file.parse(value), this.options.ui, policy);
+          content = await writeText(
+            cwd,
+            schemas.write_file.parse(value),
+            this.options.ui,
+            policy,
+            this.options.beforeChange,
+          );
           break;
         case 'edit_file':
-          content = await editText(cwd, schemas.edit_file.parse(value), this.options.ui, policy);
+          content = await editText(
+            cwd,
+            schemas.edit_file.parse(value),
+            this.options.ui,
+            policy,
+            this.options.beforeChange,
+          );
           break;
         case 'list_dir':
           content = await listDirectory(cwd, schemas.list_dir.parse(value), policy);
