@@ -323,7 +323,7 @@ program.action(async (options: CliOptions) => {
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', terminate);
 
-  const execute = async (text: string) => {
+  const execute = async (text: string, typed = text) => {
     active = new AbortController();
     const before = { ...state.session.usage };
     const started = Date.now();
@@ -333,6 +333,7 @@ program.action(async (options: CliOptions) => {
         settings,
         session: state.session,
         prompt: text,
+        mentions: typed,
         ui,
         signal: active.signal,
         approve: permissions.approve,
@@ -388,6 +389,7 @@ program.action(async (options: CliOptions) => {
         settings,
         session: state.session,
         prompt,
+        mentions: typeof options.print === 'string' ? options.print : '',
         ui: json,
         signal: active.signal,
         approve: permissions.approve,
@@ -417,7 +419,7 @@ program.action(async (options: CliOptions) => {
       `ArnCode · ${MODE_LABELS[settings.permissionMode]}\n${settings.cwd}\nSession: ${state.session.id}`,
     );
     try {
-      await execute(prompt);
+      await execute(prompt, typeof options.print === 'string' ? options.print : '');
     } finally {
       await stopAllJobs();
       input.close();

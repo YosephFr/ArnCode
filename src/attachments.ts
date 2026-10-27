@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
@@ -37,16 +37,24 @@ function resolvePath(cwd: string, value: string): string {
 }
 
 /**
- * Turn a prompt that mentions files into content blocks: images become image blocks and text
- * files are inlined. Returns undefined when nothing can be attached.
+ * Turn a prompt that mentions files into content blocks: images and PDFs become their own blocks
+ * and project text files are inlined. Only `typed` text, what the user wrote, is searched for
+ * mentions, never piped input or hook output. Text files attach only from inside the project;
+ * images and PDFs, such as a screenshot dragged in, may come from anywhere that is not protected.
+ * Returns undefined when nothing can be attached.
  */
 export async function attachMentions(
   prompt: string,
-  options: { cwd: string; sessionId: string; protectedPaths?: readonly string[] },
+  options: {
+    cwd: string;
+    sessionId: string;
+    protectedPaths?: readonly string[];
+    typed?: string;
+  },
 ): Promise<
   { content: BetaContentBlockParam[]; attached: string[]; skipped: string[] } | undefined
 > {
-  const mentions = mentionedPaths(prompt);
+  const mentions = mentionedPaths(options.typed ?? prompt);
   if (!mentions.length) return undefined;
   const policy = await createPathPolicy(options.cwd, options.protectedPaths);
   const content: BetaContentBlockParam[] = [];
@@ -56,9 +64,11 @@ export async function attachMentions(
     const file = resolvePath(options.cwd, mention);
     const info = await stat(file).catch(() => undefined);
     if (!info?.isFile()) continue;
-    const shown = path.relative(options.cwd, file).startsWith('..')
-      ? file
-      : path.relative(options.cwd, file);
+    const relative = path.relative(options.cwd, file);
+    const shown = relative.startsWith('..') || path.isAbsolute(relative) ? file : relative;
+    // Through links too: a project path may point anywhere.
+    const real = path.relative(options.cwd, await realpath(file).catch(() => file));
+    const inside = !real.startsWith('..') && !path.isAbsolute(real);
     if (await isProtected(file, policy)) {
       skipped.push(`${shown}: protected path`);
       continue;
@@ -67,7 +77,13 @@ export async function attachMentions(
       skipped.push(`${shown}: larger than 50 MiB`);
       continue;
     }
-    const data = await readFile(file);
+    let data: Buffer;
+    try {
+      data = await readFile(file);
+    } catch {
+      skipped.push(`${shown}: could not be read`);
+      continue;
+    }
     if (data.subarray(0, 5).toString('latin1') === '%PDF-') {
       const pages = estimatePdfPages(data);
       if (data.length > 12 * 1024 * 1024 || pages > 100) {
@@ -104,6 +120,9 @@ export async function attachMentions(
           },
         },
       );
+    } else if (!inside) {
+      skipped.push(`${shown}: outside the project`);
+      continue;
     } else {
       if (data.subarray(0, 4096).includes(0)) {
         skipped.push(`${shown}: binary file`);

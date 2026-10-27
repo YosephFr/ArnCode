@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PNG } from 'pngjs';
@@ -68,6 +68,33 @@ describe('prompt attachments', () => {
       type: 'text',
       text: 'Check @frame.png and @notes.md, not @.env or @gone.txt',
     });
+  });
+
+  it('attaches only what the user typed, and text only from inside the project', async () => {
+    const outside = path.join(root, 'outside');
+    await mkdir(outside);
+    await writeFile(path.join(outside, 'credentials'), 'key=1\n');
+    await writeFile(path.join(outside, 'shot.png'), png(20, 20));
+    await symlink(path.join(outside, 'credentials'), path.join(project, 'linked.txt'));
+    await writeFile(path.join(project, 'locked.txt'), 'x\n');
+    await chmod(path.join(project, 'locked.txt'), 0o000);
+    const piped = `Review this diff\n\n+ see @${path.join(outside, 'credentials')}`;
+    expect(
+      await attachMentions(piped, { cwd: project, sessionId: 's', typed: 'Review this diff' }),
+    ).toBeUndefined();
+    const typed = `Compare @${path.join(outside, 'credentials')} @linked.txt @locked.txt @${path.join(outside, 'shot.png')}`;
+    const result = await attachMentions(typed, { cwd: project, sessionId: 's', typed });
+    // A screenshot dragged in from elsewhere still attaches.
+    const asRoot = process.getuid?.() === 0;
+    expect(result?.attached).toEqual([
+      ...(asRoot ? ['locked.txt'] : []),
+      path.join(outside, 'shot.png'),
+    ]);
+    expect(result?.skipped).toEqual([
+      `${path.join(outside, 'credentials')}: outside the project`,
+      'linked.txt: outside the project',
+      ...(asRoot ? [] : ['locked.txt: could not be read']),
+    ]);
   });
 });
 

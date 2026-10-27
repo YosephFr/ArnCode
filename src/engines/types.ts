@@ -10,6 +10,8 @@ export interface EngineContext {
   credential: Credential;
   /** The user's prompt for this turn, when the turn started from one. */
   prompt?: string;
+  /** The part of the prompt the user typed, where `@path` mentions attach files. */
+  mentions?: string;
   ui: AgentUI;
   approve: Approve;
   /** The user's command hooks. */

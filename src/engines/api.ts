@@ -546,6 +546,7 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
       cwd: settings.cwd,
       sessionId: session.id,
       protectedPaths: settings.protectedPaths,
+      typed: ctx.mentions ?? '',
     });
     for (const reason of attachment?.skipped ?? []) ui.notice(`Not attached: ${reason}`);
     if (attachment?.attached.length) {

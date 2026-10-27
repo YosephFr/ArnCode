@@ -24,6 +24,8 @@ interface RunOptions {
   settings: Settings;
   session: Session;
   prompt: string;
+  /** What the user typed, where `@path` mentions attach files; never piped input. */
+  mentions?: string;
   ui: AgentUI;
   approve: Approve;
   exitPlan?: ExitPlan;
@@ -101,6 +103,7 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
         session,
         credential,
         prompt: userPrompt,
+        mentions: options.mentions,
         ui,
         approve: options.approve,
         hooks,
