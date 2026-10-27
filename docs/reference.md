@@ -251,8 +251,9 @@ Hooks run your shell commands at points in a session, in the format Claude Code 
 | `PreToolUse`       | Before a tool runs                | Blocks the call; the reason goes to the model         |
 | `PostToolUse`      | After a tool runs                 | Shows the reason to the model as feedback             |
 | `Stop`             | When the agent finishes its reply | Sends the reason back as a request, up to three times |
+| `SessionStart`     | When a session starts or resumes  | Nothing to block; output is added as context          |
 
-Each hook receives JSON on stdin with `session_id`, `cwd`, `hook_event_name`, and, for tool events, `tool_name` and `tool_input` (`tool_response` after the call). Matchers are regular expressions over tool names as Claude Code names them: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Task`, `TodoWrite`, `WebSearch`, and `WebFetch`, in both auth modes. A hook can also print `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}` or `additionalContext`. Hooks time out after 60 seconds unless `timeout` (seconds) says otherwise. They load from your configuration only; hooks defined inside a project are not run, so opening a repository never executes its commands.
+Each hook receives JSON on stdin with `session_id`, `cwd`, `hook_event_name`, and, for tool events, `tool_name` and `tool_input` (`tool_response` after the call); `SessionStart` gets `source`, `startup` or `resume`. Matchers are regular expressions over tool names as Claude Code names them: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Task`, `TodoWrite`, `WebSearch`, and `WebFetch`, in both auth modes. A hook can also print `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}` or `additionalContext`. Hooks time out after 60 seconds unless `timeout` (seconds) says otherwise. They load from your configuration only; hooks defined inside a project are not run, so opening a repository never executes its commands.
 
 ### Protected paths
 

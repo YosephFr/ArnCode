@@ -2,7 +2,13 @@ import { z } from 'zod';
 import { redact } from './redact.js';
 import { runProcess } from './tools/process.js';
 
-export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop'] as const;
+export const HOOK_EVENTS = [
+  'PreToolUse',
+  'PostToolUse',
+  'UserPromptSubmit',
+  'Stop',
+  'SessionStart',
+] as const;
 export type HookEvent = (typeof HOOK_EVENTS)[number];
 
 const hookCommand = z
@@ -24,6 +30,7 @@ export const hooksSchema = z
     PostToolUse: eventSchema,
     UserPromptSubmit: eventSchema,
     Stop: eventSchema,
+    SessionStart: eventSchema,
   })
   .strict();
 
@@ -150,7 +157,11 @@ export class Hooks {
         blocked.push(decision.reason || stderr || 'Blocked by a hook.');
       } else if (decision.additionalContext) {
         context.push(decision.additionalContext);
-      } else if (stdout && result.exitCode === 0 && ['UserPromptSubmit'].includes(event)) {
+      } else if (
+        stdout &&
+        result.exitCode === 0 &&
+        ['UserPromptSubmit', 'SessionStart'].includes(event)
+      ) {
         context.push(stdout);
       }
     }

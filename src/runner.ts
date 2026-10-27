@@ -35,6 +35,9 @@ interface RunOptions {
   ignoreCooldown?: boolean;
 }
 
+// Sessions whose SessionStart hooks already ran in this process.
+const startedSessions = new Set<string>();
+
 export async function runTask(options: RunOptions): Promise<UsageTotals> {
   const { settings, session, ui, signal } = options;
   const meter = options.meter ?? new MeterStore();
@@ -52,6 +55,12 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
     );
   const hooks = new Hooks(settings.hooks, { cwd: settings.cwd, sessionId: () => session.id });
   let promptText = options.prompt;
+  if (hooks.has('SessionStart') && !startedSessions.has(session.id)) {
+    startedSessions.add(session.id);
+    const source = session.transcript.length ? 'resume' : 'startup';
+    const outcome = await hooks.run('SessionStart', { source }, { signal });
+    if (outcome.context) promptText = `${outcome.context}\n\n${promptText}`;
+  }
   if (hooks.has('UserPromptSubmit')) {
     const outcome = await hooks.run('UserPromptSubmit', { prompt: options.prompt }, { signal });
     if (outcome.blocked) throw new Error(`A hook blocked this request: ${outcome.blocked}`);

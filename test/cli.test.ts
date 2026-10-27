@@ -544,6 +544,7 @@ describe('hooks', () => {
       path.join(config, 'config.json'),
       JSON.stringify({
         hooks: {
+          SessionStart: [{ hooks: [{ type: 'command', command: 'echo "Session context"' }] }],
           UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo "Context from hook"' }] }],
           PreToolUse: [
             { matcher: 'Bash', hooks: [{ type: 'command', command: `bash ${hooks}/guard.sh` }] },
@@ -565,6 +566,7 @@ describe('hooks', () => {
     expect(run.code, run.stderr).toBe(0);
     expect(run.stdout).toBe('Done.\nAdded the test.\n');
     expect(JSON.stringify(api.requests[0]!.body.messages)).toContain('Context from hook');
+    expect(JSON.stringify(api.requests[3]!.body.messages).split('Session context')).toHaveLength(2);
     expect(api.requests[1]!.body.messages.at(-1)).toMatchObject({
       content: [
         {
