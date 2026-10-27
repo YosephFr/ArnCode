@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { blobDigest, readBlob, storeBlob } from './blobs.js';
+import { realLocation } from './permission-rules.js';
 import type { Session } from './session.js';
 import { atomicWrite } from './tools/files.js';
 
@@ -51,7 +52,8 @@ export function startCheckpoint(session: Session, prompt: string): void {
 /** Keep a file's content before the agent first changes it in the current request. */
 export async function recordChange(session: Session, file: string): Promise<void> {
   const checkpoint = session.checkpoints?.at(-1);
-  const target = path.resolve(file);
+  // The real file, so undoing writes through a link instead of replacing the link itself.
+  const target = await realLocation(path.resolve(file));
   if (!checkpoint || checkpoint.files.some((entry) => entry.path === target)) return;
   const info = await stat(target).catch(() => undefined);
   if (!info) {

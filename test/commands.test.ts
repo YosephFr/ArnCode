@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -201,6 +201,54 @@ describe('undo', () => {
       ui: { notice: (text: string) => notices.push(text) } as unknown as TerminalUI,
     });
     expect(notices.at(-1)).toContain('Nothing to undo');
+  });
+});
+
+describe('undo through links', () => {
+  it('restores the real file and keeps the link', async () => {
+    const settings = { ...DEFAULTS, cwd: project };
+    const session = newSession(settings);
+    const agents = path.join(project, 'AGENTS.md');
+    const link = path.join(project, 'CLAUDE.md');
+    await writeFile(agents, 'old\n');
+    await symlink('AGENTS.md', link);
+    await runTask({
+      settings,
+      session,
+      prompt: 'Update the instructions',
+      ui: { notice: () => undefined, idle: () => undefined, endText: () => undefined } as never,
+      approve: async () => ({ allowed: true }),
+      signal: new AbortController().signal,
+      meter: new MeterStore(path.join(root, 'state')),
+      save: async () => undefined,
+      candidates: [
+        {
+          name: 'api',
+          type: 'api-key',
+          secret: 'fixture-key',
+          source: 'stored',
+          priority: 0,
+          enabled: true,
+          createdAt: '2026-10-27T00:00:00.000Z',
+        },
+      ],
+      engines: {
+        // OAuth tools name the path they were given, which may be a link.
+        'api-key': async (ctx) => {
+          await ctx.recordChange!(link);
+          await writeFile(link, 'new\n');
+        },
+        oauth: async () => undefined,
+      },
+    });
+    await slashCommand('/undo', {
+      settings,
+      session,
+      permissions: new PermissionManager('full', false, async () => 'n'),
+      ui: { notice: () => undefined } as unknown as TerminalUI,
+    });
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(await readFile(agents, 'utf8')).toBe('old\n');
   });
 });
 
