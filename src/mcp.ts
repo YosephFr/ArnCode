@@ -1,7 +1,7 @@
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { z } from 'zod';
 import { prepareImage } from './images.js';
-import { redact, registerSecret } from './redact.js';
+import { redact, registerServerSecrets } from './redact.js';
 import type { ToolContent, ToolResult } from './tools/index.js';
 
 const stdioServer = z
@@ -70,11 +70,10 @@ function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: stri
 
 async function connect(server: string, config: McpServer, cwd: string): Promise<Connection> {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-  for (const value of [
-    ...Object.values('env' in config ? (config.env ?? {}) : {}),
-    ...Object.values('headers' in config ? (config.headers ?? {}) : {}),
-  ])
-    registerSecret(value);
+  registerServerSecrets(
+    'env' in config ? config.env : undefined,
+    'headers' in config ? config.headers : undefined,
+  );
   let transport;
   if ('command' in config) {
     const { StdioClientTransport, getDefaultEnvironment } =

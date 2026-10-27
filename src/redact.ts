@@ -18,6 +18,24 @@ export function registerEnvironmentSecrets(env: NodeJS.ProcessEnv = process.env)
   }
 }
 
+/**
+ * Secrets in a server's `env` and `headers`: values under secret-looking names, long enough to
+ * be one, so settings such as `DEBUG=1` are not masked everywhere they appear.
+ */
+export function registerServerSecrets(
+  env: Record<string, string> = {},
+  headers: Record<string, string> = {},
+): void {
+  const sensitive = /key|token|secret|password|passwd|credential|auth|cookie|session/i;
+  for (const [name, value] of [...Object.entries(env), ...Object.entries(headers)]) {
+    if (!sensitive.test(name) || value.length < 8) continue;
+    registerSecret(value);
+    // "Bearer abc…" also hides the bare token.
+    const token = /^\S+\s+(\S{8,})$/.exec(value)?.[1];
+    if (token) registerSecret(token);
+  }
+}
+
 export function redact(value: string): string {
   let result = value;
   for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {

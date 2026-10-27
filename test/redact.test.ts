@@ -3,6 +3,7 @@ import {
   redact,
   redactDeep,
   registerEnvironmentSecrets,
+  registerServerSecrets,
   registerSecret,
   StreamingRedactor,
 } from '../src/redact.js';
@@ -64,5 +65,15 @@ describe('secret redaction', () => {
     const stream = new StreamingRedactor();
     expect(stream.write('overlap-test')).toBe('');
     expect(stream.write('-credential!') + stream.flush()).toBe('[redacted]!');
+  });
+
+  it('takes only secret-looking server settings as secrets', () => {
+    registerServerSecrets(
+      { DEBUG: '1', LOG_LEVEL: 'error', SERVICE_TOKEN: 'server-token-value-1' },
+      { Authorization: 'Bearer header-token-value-2', Accept: 'application/json' },
+    );
+    expect(redact('1 error server-token-value-1 header-token-value-2 application/json')).toBe(
+      '1 error [redacted] [redacted] application/json',
+    );
   });
 });
