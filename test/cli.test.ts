@@ -587,6 +587,31 @@ describe('hooks', () => {
 });
 
 describe('MCP servers', () => {
+  it('keeps MCP tools in summary requests so they reuse the cached prefix', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url));
+    await mkdir(config, { recursive: true });
+    await writeFile(
+      path.join(config, 'config.json'),
+      JSON.stringify({ mcpServers: { fixture: { command: process.execPath, args: [fixture] } } }),
+    );
+    await writeFile(path.join(project, 'notes.txt'), 'remember\n');
+    const api = await mockAPI([
+      { tool: { name: 'read_file', id: 'r1', input: { path: 'notes.txt' } }, inputTokens: 30_000 },
+      { blocks: [{ type: 'compaction', content: 'Summary.' }], stop: 'compaction' },
+      { text: ['done\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Read the notes.'], '', {
+      ARNCODE_API_FEATURES: 'full',
+      ARNCODE_COMPACT_AT: '20000',
+    });
+    expect(run.code, run.stderr).toBe(0);
+    const tools = (index: number) =>
+      (api.requests[index]?.body.tools ?? []).map((tool) => (tool as { name: string }).name);
+    expect(api.requests[1]?.body).toHaveProperty('compaction');
+    expect(tools(1)).toEqual(tools(0));
+    expect(tools(0)).toContain('mcp__fixture__echo');
+  }, 30_000);
+
   it('offers configured MCP tools to the model and runs them', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url));
     await mkdir(config, { recursive: true });

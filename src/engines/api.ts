@@ -386,6 +386,11 @@ export async function compactConversation(
   const kept = keepLast ? session.messages.slice(-1) : [];
   const history = keepLast ? session.messages.slice(0, -1) : session.messages;
   if (!history.length) return false;
+  // The same tools as the conversation's requests, so the summary reuses their cached prefix.
+  const mcp =
+    settings.mcpServers && !session.api.tools
+      ? await connectMcp(settings.mcpServers, settings.cwd)
+      : undefined;
   ui.status('Compacting conversation');
   try {
     const message = await withRetry(
@@ -393,6 +398,7 @@ export async function compactConversation(
         await ctx.onRequest();
         const params = apiRequest(settings, { ...session, messages: history }, mode, {
           compaction: true,
+          ...(mcp?.definitions.length ? { extraTools: mcp.definitions } : {}),
         });
         params.messages = await hydrateMessages(params.messages, session.id);
         return openStream(client, params, mode, signal).finalMessage();
