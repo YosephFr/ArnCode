@@ -39,7 +39,7 @@ On the official endpoint, requests also opt into these features where the model 
 
 ### Prompt caching
 
-API-key requests set three explicit cache breakpoints: the last tool definition, the stable system prompt, and the final block of the latest user message, including tool results. The conversation breakpoint moves forward with each request so eligible unchanged history can be reused. All use the default five-minute ephemeral TTL.
+API-key requests set three explicit cache breakpoints: the last tool definition, the stable system prompt, and the final block of the latest user message, including tool results. The conversation breakpoint moves forward with each request so eligible unchanged history can be reused. All use the default five-minute ephemeral TTL. While tools run for longer than four minutes, a zero-output request refreshes the cache for the price of a cache read, so the next request does not write the whole conversation again.
 
 Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt length, and provider support. Short prompts can report zero cache tokens even when caching is requested. See Anthropic's [prompt-caching rules](https://platform.claude.com/docs/en/build-with-claude/prompt-caching). OAuth caching is managed by the Agent SDK.
 

@@ -25,15 +25,15 @@ Working backlog for the `overnight-2026-10-27` branch. Items are ordered by prio
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
 | 2.1  | API loop on the beta Messages API: frozen per-session system prompt, `drop_block` thinking binding, progress updates, refusal fallback, eager tool-input streaming | done   |
 | 2.2  | Permission modes `full` (default), `edits`, `ask`, `plan`; `ExitPlanMode` approval; Shift+Tab cycling                                                              | done   |
-| 2.3  | `/model` picker with aliases; `/effort` that keeps the prompt cache (per-message effort)                                                                           | doing  |
+| 2.3  | `/model` picker with aliases; `/effort` that keeps the prompt cache (per-message effort)                                                                           | done   |
 | 2.4  | Status bar: model, effort, mode, context use, 5-hour and weekly plan use, active credential, session cost                                                          | done   |
 | 2.5  | Subagents: `Task` tool in API mode (parallel, read-only explorer by default); SDK agents in OAuth mode                                                             | done   |
 | 2.6  | Todo list: `TodoWrite` in both modes, rendered as a checklist                                                                                                      | done   |
-| 2.7  | Hooks compatible with Claude Code's command hooks (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionStart`)                                        | todo   |
-| 2.8  | Slash commands: `/compact`, `/context`, `/status`, `/resume`, `/todos`, `/plan`, `/export`, `/init`, `/theme`; custom Markdown commands                            | doing  |
-| 2.9  | MCP servers (stdio and HTTP) in both modes                                                                                                                         | todo   |
-| 2.10 | Automatic compaction (server-side in API mode) and `/compact`                                                                                                      | doing  |
-| 2.11 | Session picker for `--resume` and `/resume`, with the conversation tail replayed                                                                                   | todo   |
+| 2.7  | Hooks compatible with Claude Code's command hooks (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionStart`)                                        | done   |
+| 2.8  | Slash commands: `/compact`, `/context`, `/status`, `/resume`, `/todos`, `/plan`, `/export`, `/init`, `/theme`; custom Markdown commands                            | done   |
+| 2.9  | MCP servers (stdio and HTTP) in both modes                                                                                                                         | done   |
+| 2.10 | Automatic compaction (server-side in API mode) and `/compact`                                                                                                      | done   |
+| 2.11 | Session picker for `--resume` and `/resume`, with the conversation tail replayed                                                                                   | done   |
 | 2.12 | Web search and fetch: server tools in API mode, native tools in OAuth mode                                                                                         | done   |
 
 ## P3. Terminal interface
@@ -41,33 +41,33 @@ Working backlog for the `overnight-2026-10-27` branch. Items are ordered by prio
 | ID  | Item                                                                                                      | Status |
 | --- | --------------------------------------------------------------------------------------------------------- | ------ |
 | 3.1 | Renderer with a sticky footer (spinner, status bar) above which output streams                            | done   |
-| 3.2 | Streaming Markdown with code highlighting                                                                 | doing  |
+| 3.2 | Streaming Markdown with code highlighting                                                                 | done   |
 | 3.3 | Line editor: history, multiline, bracketed paste, completion for commands and `@` paths, Esc to interrupt | done   |
 | 3.4 | Tool calls and results rendered compactly; diffs with line numbers and word highlights                    | done   |
-| 3.5 | Themes: dark, light, plain                                                                                | doing  |
+| 3.5 | Themes: dark, light, plain                                                                                | done   |
 
 ## P4. Speed and token efficiency
 
 | ID  | Item                                                                                                  | Status |
 | --- | ----------------------------------------------------------------------------------------------------- | ------ |
 | 4.1 | Read-only tools and subagents in one turn run in parallel; mutating tools keep their order            | done   |
-| 4.2 | Append-only history (no client-side truncation); stable cached prefix; cache keep-alive on long tools | doing  |
-| 4.3 | OAuth: one live SDK session per interactive conversation instead of a new process per prompt          | todo   |
+| 4.2 | Append-only history (no client-side truncation); stable cached prefix; cache keep-alive on long tools | done   |
+| 4.3 | OAuth: one live SDK session per interactive conversation instead of a new process per prompt          | held   |
 | 4.4 | `Edit` tolerates whitespace and indentation drift before failing                                      | done   |
-| 4.5 | Faster startup through lazy imports                                                                   | todo   |
+| 4.5 | Faster startup through lazy imports                                                                   | done   |
 | 4.6 | Tool results within about 10k tokens; tail-weighted command output saved to a file when cut           | done   |
 | 4.7 | `-p --output-format json` and `stream-json` for scripts and the benchmark harness                     | done   |
 
-Notes: `/effort` already keeps the cache; `/model` picker pending. Automatic compaction is live; `/compact` pending. Append-only history is live; cache keep-alive pending. Themes follow the terminal (dark, light, plain); `/theme` pending. Markdown rendering is in progress.
+Notes: 4.3 is held; see D11. 4.5 loads the Messages SDK, Agent SDK, MCP client and image codecs on first use. `arncode --version` takes about 0.3 s against 0.08 s for bare Node; most of the rest is zod and the terminal libraries that every run needs, so the entry point was not restructured.
 
 ## P5. Credential bank
 
 | ID  | Item                                                                           | Status |
 | --- | ------------------------------------------------------------------------------ | ------ |
-| 5.1 | `creds add` detects the credential type from the token                         | todo   |
-| 5.2 | Interactive `creds` manager: status, usage, order, enable and disable          | todo   |
-| 5.3 | Relative reset times; plan use per OAuth credential from SDK rate-limit events | todo   |
-| 5.4 | `creds priority` and `creds rename`                                            | todo   |
+| 5.1 | `creds add` detects the credential type from the token                         | done   |
+| 5.2 | Interactive `creds` manager: status, usage, order, enable and disable          | done   |
+| 5.3 | Relative reset times; plan use per OAuth credential from SDK rate-limit events | done   |
+| 5.4 | `creds priority` and `creds rename`                                            | done   |
 
 ## P6. Benchmark harness
 
@@ -85,3 +85,8 @@ Notes: `/effort` already keeps the cache; `/model` picker pending. Automatic com
 - **D6. Edits match in three tiers only**: exact, typographic variants, trailing whitespace, with line endings kept per line (adapted from OpenCode, MIT). Looser fuzzy matching deleted content in OpenCode and was removed there.
 - **D7. Re-encoded images stay under 700 KB**: JPEG quality 85, 75, then 60, then smaller dimensions, because every image is resent with each request until a summary drops it.
 - **D8. Plan mode is enforced by the tools**, not only the prompt: read-only tools run, writes are limited to plan files, and shell commands need approval.
+- **D9. Hooks and MCP servers load from the user's configuration only.** Project files never run commands, so opening a repository cannot execute anything.
+- **D10. Read-only explorer subagents default to Claude Haiku 5.5 at low effort** on the official endpoint (`ARNCODE_EXPLORE_MODEL` overrides); general subagents use the session model.
+- **D11. OAuth keeps one SDK query per prompt.** A probe of the Agent SDK showed cumulative cost and usage totals across turns and no cache read on the second turn of a shared session, so a long-lived session would add complexity without a measured gain.
+- **D12. Web tools are on by default** in both modes, with `"webTools": false` to turn them off; Haiku and Fable skip the server tools they do not support.
+- **D13. Themes change at once and are saved.** `/theme` restyles the footer and new output; scrollback keeps the colors it was printed with.
