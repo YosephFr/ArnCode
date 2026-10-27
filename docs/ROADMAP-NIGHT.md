@@ -76,6 +76,22 @@ Notes: 4.5 loads the Messages SDK, Agent SDK, MCP client and image codecs on fir
 | --- | -------------------------------------------------------------------------------------------------------------------------------- | ------ |
 | 6.1 | `bench/` with fixture tasks and automatic checks; several runs per contestant; JSON and Markdown reports; mock contestant for CI | done   |
 
+## P7. Review round
+
+An audit of the night's work found twelve defects, all fixed with regression tests (approval questions that could hang, attachments outside the project, a plan-mode symlink escape, JSON output that broke commands, model switches that invalidated history, OAuth subagent text in the reply, Esc closing the app, slow pipes, summary cache misses, session titles, `$` handling, history size). A design review proposed the next changes below.
+
+| ID  | Item                                                                                       | Status |
+| --- | ------------------------------------------------------------------------------------------ | ------ |
+| 7.1 | `/undo` restores the files the latest request changed                                      | done   |
+| 7.2 | Background commands in API-key sessions (`run_in_background`, `bash_output`, `kill_shell`) | done   |
+| 7.3 | Reads of up to 2,000 lines; search and `@` completion respect `.gitignore`                 | done   |
+| 7.4 | Environment block in API-key prompts; `CLAUDE.local.md` and `~/.claude/CLAUDE.md` fallback | done   |
+| 7.5 | Approval previews for edits; plans rendered as Markdown                                    | done   |
+| 7.6 | Permission rules for commands and paths, kept across sessions                              | todo   |
+| 7.7 | First run: offer `claude setup-token` when Claude Code is installed                        | todo   |
+| 7.8 | Project `.mcp.json` after a one-time trust prompt                                          | todo   |
+| 7.9 | Larger benchmark tasks; a published comparison run                                         | todo   |
+
 ## Decisions
 
 - **D1. Beta Messages API for the API loop.** The SDK types preserved-thinking controls, progress updates, compaction and fallbacks only in the beta namespace.
@@ -91,3 +107,8 @@ Notes: 4.5 loads the Messages SDK, Agent SDK, MCP client and image codecs on fir
 - **D11. OAuth resumes the SDK session; the process still starts per prompt.** Measured on Claude Haiku 5.5: a resumed follow-up wrote 140 tokens to the cache and read 11.5k, where resending the transcript wrote about 2.7k and sent 2.3k uncached, and the gap grows with the conversation. The SDK reports totals across a resumed session, so each request is billed by difference, and a request without a final result drops the thread. SDK files live in `~/.arncode/claude`; `"oauthSessions": false` restores the transcript-only behavior. A trivial prompt takes about 2.8 s, of which about 1 s is the SDK process starting; `prewarm` is alpha and fixes hooks, MCP servers, the environment and the permission callback up front, all of which ArnCode binds to each request and credential, so it waits.
 - **D12. Web tools are on by default** in both modes, with `"webTools": false` to turn them off; Haiku and Fable skip the server tools they do not support.
 - **D13. Themes change at once and are saved.** `/theme` restyles the footer and new output; scrollback keeps the colors it was printed with.
+- **D14. Attachments come only from what the user types.** Piped input and hook output are never searched for `@` mentions; text files attach only from inside the project, through links too, while images and PDFs may come from anywhere that is not protected.
+- **D15. Background commands are API-key only.** Each OAuth prompt runs in its own SDK process, so shells started there would end with the prompt.
+- **D16. stdin: shell pipes are read to the end; sockets get 3 seconds.** Harnesses that spawn ArnCode through Node leave stdin as a socket that may never close.
+- **D17. `~/.claude/CLAUDE.md` applies when `~/.arncode/AGENTS.md` does not exist**, as in OpenCode.
+- **D18. `/undo` covers write and edit tools for the last 20 requests**; changes made through shell commands are not tracked, as in Claude Code's rewind.
