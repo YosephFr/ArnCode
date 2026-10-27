@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander';
+import { fstatSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { credentialCommands, integer } from './commands/credentials.js';
@@ -165,8 +166,18 @@ program.action(async (options: CliOptions) => {
   const oneShot = options.print !== undefined || !input.interactive;
   let piped = '';
   if (!process.stdin.isTTY) {
-    // A prompt on the command line makes stdin optional, so an idle pipe must not block the run.
-    const stdin = await readStdin(typeof options.print === 'string' ? { waitMs: 3000 } : {});
+    // A shell pipe is read to its end, however slow the command feeding it. Harnesses that spawn
+    // ArnCode through Node leave stdin as a socket that may never close; with a prompt on the
+    // command line, that stdin is optional and skipped when nothing arrives.
+    let socket = false;
+    try {
+      socket = fstatSync(0).isSocket();
+    } catch {
+      // A closed stdin reads as empty below.
+    }
+    const stdin = await readStdin(
+      socket && typeof options.print === 'string' ? { waitMs: 3000 } : {},
+    );
     if (stdin.skipped)
       ui.notice('No input arrived on stdin within 3 seconds, so the run continues without it.');
     piped = stdin.text;
