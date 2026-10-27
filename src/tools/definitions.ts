@@ -18,7 +18,8 @@ export const toolDefinitions: Tool[] = [
           type: 'integer',
           minimum: 1,
           maximum: 2000,
-          description: 'Maximum lines. Default 200.',
+          description:
+            'Maximum lines. Default 2000; a read also stops at about 10,000 tokens and says where to continue.',
         },
       },
       required: ['path'],

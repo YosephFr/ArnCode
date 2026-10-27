@@ -53,7 +53,7 @@ const schemas = {
     .object({
       path: filePath,
       offset: z.number().int().min(1).default(1),
-      limit: z.number().int().min(1).max(2000).default(200),
+      limit: z.number().int().min(1).max(2000).default(2000),
     })
     .strict(),
   write_file: z.object({ path: filePath, content: z.string().max(5 * 1024 * 1024) }).strict(),
