@@ -28,7 +28,7 @@ import {
 import { InteractiveApp, type Suggestion } from './tui/app.js';
 import { themeFor } from './tui/theme.js';
 import { duration } from './tui/text.js';
-import { TerminalUI, displayName, setDisplayRoot, toolSummary } from './ui.js';
+import { TerminalUI, displayName, setDisplayRoot, terminalText, toolSummary } from './ui.js';
 import { formatUsage } from './usage.js';
 import { MeterStore } from './metering.js';
 import { proposedChange } from './tools/files.js';
@@ -59,6 +59,12 @@ interface CliOptions {
   resume?: string | boolean;
   continue?: boolean;
   outputFormat?: OutputFormat;
+}
+
+/** A command or other target on one short line, for an approval question. */
+function questionTarget(value: string): string {
+  const line = terminalText(redact(value)).replace(/\s+/g, ' ').trim();
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 }
 
 const ui = new TerminalUI();
@@ -302,10 +308,11 @@ program.action(async (options: CliOptions) => {
         ).catch(() => undefined);
         if (change) ui.diff(change.file, change.before, change.after, { proposed: true });
         const answer = await app.select(
-          ['bash', 'Bash'].includes(name)
-            ? 'Run this command?'
+          // Questions can queue behind each other, so each names what it approves.
+          ['bash', 'Bash'].includes(name) && typeof args.command === 'string'
+            ? `Run ${questionTarget(args.command)}?`
             : change
-              ? 'Make this change?'
+              ? `Apply this change to ${questionTarget(change.file)}?`
               : `Allow ${toolSummary(tool, args)}?`,
           [
             { label: 'Yes', value: 'y', key: 'y' },
