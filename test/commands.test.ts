@@ -66,6 +66,9 @@ describe('custom commands', () => {
     expect(expandCommand({ ...command, body: 'Explain.' }, 'the parser')).toBe(
       'Explain.\n\nthe parser',
     );
+    expect(expandCommand({ ...command, body: 'Run $ARGUMENTS' }, 'echo "$$ $1"')).toBe(
+      'Run echo "$$ $1"',
+    );
   });
 });
 

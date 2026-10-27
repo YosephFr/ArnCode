@@ -36,7 +36,8 @@ describe('line editor', () => {
 
   it('collapses large pastes and expands them on submit', () => {
     const editor = new LineEditor();
-    const pasted = Array.from({ length: 12 }, (_, index) => `line ${index}`);
+    // Shell variables such as $$ and $' must survive expansion unchanged.
+    const pasted = Array.from({ length: 12 }, (_, index) => `line ${index} $$ $'`);
     editor.handle(undefined, { name: 'paste-start' });
     for (const [index, line] of pasted.entries()) {
       type(editor, line);

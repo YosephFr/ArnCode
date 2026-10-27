@@ -107,7 +107,8 @@ export class LineEditor {
   /** Text to send: collapsed pastes are expanded back to their content. */
   value(): string {
     let value = this.text;
-    for (const [token, content] of this.pastes) value = value.replace(token, content);
+    // A function replacement keeps `$` sequences in pasted text literal.
+    for (const [token, content] of this.pastes) value = value.replace(token, () => content);
     return value;
   }
 

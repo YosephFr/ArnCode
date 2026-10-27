@@ -92,8 +92,9 @@ export function splitArguments(text: string): string[] {
 export function expandCommand(command: CustomCommand, args: string): string {
   const values = splitArguments(args);
   const placeholders = /\$ARGUMENTS|\$[1-9]/.test(command.body);
-  const filled = command.body
-    .replaceAll('$ARGUMENTS', args)
-    .replace(/\$([1-9])/g, (_match, index: string) => values[Number(index) - 1] ?? '');
+  // One pass, so `$` sequences inside the arguments are never substituted again.
+  const filled = command.body.replace(/\$ARGUMENTS|\$([1-9])/g, (_match, index?: string) =>
+    index ? (values[Number(index) - 1] ?? '') : args,
+  );
   return placeholders || !args.trim() ? filled : `${filled}\n\n${args}`;
 }

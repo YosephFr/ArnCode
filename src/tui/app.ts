@@ -191,7 +191,8 @@ export class InteractiveApp {
       case 'submit': {
         const text = this.editor.value();
         if (!text.trim()) break;
-        this.editor.remember(this.editor.text);
+        // History keeps the pasted text itself; its placeholder means nothing once recalled.
+        this.editor.remember(text);
         this.editor.clear();
         this.suggestions = undefined;
         if (this.waiting) {
