@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { PermissionManager } from '../src/permissions.js';
 
@@ -87,5 +90,24 @@ describe('edit and plan modes', () => {
       allowed: false,
       reason: expect.stringContaining('plan mode requires an interactive terminal'),
     });
+  });
+
+  it('does not treat a linked plan directory as a place for plans', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'arncode-plan-'));
+    try {
+      await mkdir(path.join(project, 'src'));
+      await mkdir(path.join(project, '.arncode'));
+      await symlink('../src', path.join(project, '.arncode', 'plans'));
+      const permissions = new PermissionManager('plan', true, async () => 'n', project);
+      expect(
+        (await permissions.approve('write_file', { path: '.arncode/plans/app.ts' })).allowed,
+      ).toBe(false);
+      expect(
+        (await permissions.approve('Write', { file_path: path.join(project, 'src', 'x.md') }))
+          .allowed,
+      ).toBe(false);
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
   });
 });

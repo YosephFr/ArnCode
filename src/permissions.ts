@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { Approval, PermissionMode } from './types.js';
 
@@ -50,10 +51,25 @@ export function isReadOnlyTool(name: string): boolean {
   return readOnlyTools.has(name);
 }
 
-function isPlanFile(cwd: string, input: Record<string, unknown>): boolean {
+/** The real location of a path that may not exist yet, through its nearest existing parent. */
+async function realLocation(file: string): Promise<string> {
+  const rest: string[] = [];
+  for (let current = file; ; current = path.dirname(current)) {
+    try {
+      return path.join(await realpath(current), ...rest);
+    } catch {
+      if (path.dirname(current) === current) return file;
+      rest.unshift(path.basename(current));
+    }
+  }
+}
+
+// Compared by real location, so a plan directory linked elsewhere grants nothing.
+async function isPlanFile(cwd: string, input: Record<string, unknown>): Promise<boolean> {
   const target = input.path ?? input.file_path;
   if (typeof target !== 'string') return false;
-  const relative = path.relative(path.resolve(cwd, PLAN_DIRECTORY), path.resolve(cwd, target));
+  const plans = path.join(await realLocation(path.resolve(cwd)), PLAN_DIRECTORY);
+  const relative = path.relative(plans, await realLocation(path.resolve(cwd, target)));
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
@@ -80,7 +96,8 @@ export class PermissionManager {
     if (signal?.aborted) return { allowed: false, reason: 'Operation cancelled.' };
     if (this.mode === 'full' || readOnlyTools.has(name)) return { allowed: true };
     if (this.mode === 'plan') {
-      if (editTools.has(name) && this.cwd && isPlanFile(this.cwd, input)) return { allowed: true };
+      if (editTools.has(name) && this.cwd && (await isPlanFile(this.cwd, input)))
+        return { allowed: true };
       if (!shellTools.has(name))
         return {
           allowed: false,
