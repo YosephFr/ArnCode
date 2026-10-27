@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getConfigDir } from './config.js';
 import { mcpServersSchema, type McpServers } from './mcp.js';
-import { atomicWriteJson, readJson, withFileLock } from './storage.js';
+import { atomicWriteJson, isFileError, readJson, withFileLock } from './storage.js';
 
 /** `${NAME}` and `${NAME:-default}` from the environment, as in Claude Code's `.mcp.json`. */
 function expand(value: string, env: NodeJS.ProcessEnv): string {
@@ -33,15 +34,26 @@ export async function projectMcp(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ProjectMcp | undefined> {
-  const file = (await readJson(path.join(cwd, '.mcp.json'))) as
-    { mcpServers?: unknown } | undefined;
+  // A plain read: the project's files keep their permissions.
+  const text = await readFile(path.join(cwd, '.mcp.json'), 'utf8').catch((error: unknown) => {
+    if (isFileError(error, 'ENOENT')) return undefined;
+    throw error;
+  });
+  if (text === undefined) return undefined;
+  let file: { mcpServers?: unknown };
+  try {
+    file = JSON.parse(text) as { mcpServers?: unknown };
+  } catch {
+    throw new Error('.mcp.json is not valid JSON.');
+  }
   if (!file?.mcpServers || typeof file.mcpServers !== 'object') return undefined;
-  const parsed = mcpServersSchema.safeParse(file.mcpServers);
+  // Values are filled in before checking, so `"url": "${MCP_URL}"` works.
+  const parsed = mcpServersSchema.safeParse(expandAll(file.mcpServers, env));
   if (!parsed.success) throw new Error('.mcp.json has an invalid server definition.');
   if (!Object.keys(parsed.data).length) return undefined;
   // The digest covers the file as written, before environment values are filled in.
-  const digest = createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex');
-  return { servers: expandAll(parsed.data, env) as McpServers, digest };
+  const digest = createHash('sha256').update(JSON.stringify(file.mcpServers)).digest('hex');
+  return { servers: parsed.data, digest };
 }
 
 function trustFile(dir: string): string {
