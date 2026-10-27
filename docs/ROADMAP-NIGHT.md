@@ -16,7 +16,7 @@ Working backlog for the `overnight-2026-10-27` branch. Items are ordered by prio
 | 1.2 | Large images are downscaled and re-encoded client-side (pure JS) so requests stay small and under the per-image limit | done   |
 | 1.3 | Image bytes are stored once per session outside the JSON transcript and replayed byte-identically                     | done   |
 | 1.4 | Prompts can attach images by path (`@frame.png` or a pasted path)                                                     | done   |
-| 1.5 | PDF files are returned as document blocks                                                                             | todo   |
+| 1.5 | PDF files are returned as document blocks                                                                             | done   |
 | 1.6 | Portable transcripts record an image placeholder, never base64                                                        | done   |
 
 ## P2. Agent features

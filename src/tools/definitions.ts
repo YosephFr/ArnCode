@@ -4,7 +4,7 @@ export const toolDefinitions: Tool[] = [
   {
     name: 'read_file',
     description:
-      'Read a UTF-8 project file with line numbers, or look at an image (PNG, JPEG, GIF or WebP) such as a screenshot or a rendered frame. Use offset and limit to page through large text files. Large images are downscaled to fit the model. Paths are relative to the project directory; symlinks may not escape it.',
+      'Read a UTF-8 project file with line numbers, look at an image (PNG, JPEG, GIF or WebP) such as a screenshot or a rendered frame, or read a PDF of up to 100 pages. Use offset and limit to page through large text files. Large images are downscaled to fit the model. Paths are relative to the project directory; symlinks may not escape it.',
     input_schema: {
       type: 'object',
       properties: {

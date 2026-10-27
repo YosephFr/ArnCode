@@ -7,6 +7,7 @@ import { prepareImage, probeImage } from './images.js';
 import { redact } from './redact.js';
 import { createPathPolicy, isProtected } from './tools/paths.js';
 import { describeImage } from './tools/index.js';
+import { estimatePdfPages } from './tools/files.js';
 
 const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp)$/i;
 const MAX_ATTACHMENTS = 10;
@@ -67,7 +68,24 @@ export async function attachMentions(
       continue;
     }
     const data = await readFile(file);
-    if (IMAGE_FILE.test(file) || probeImage(data)) {
+    if (data.subarray(0, 5).toString('latin1') === '%PDF-') {
+      const pages = estimatePdfPages(data);
+      if (data.length > 12 * 1024 * 1024 || pages > 100) {
+        skipped.push(`${shown}: PDF too large to attach; extract the pages you need first`);
+        continue;
+      }
+      content.push(
+        { type: 'text', text: `PDF ${shown} (about ${pages} page${pages === 1 ? '' : 's'})` },
+        {
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: 'application/pdf',
+            data: await storeBlob(options.sessionId, data),
+          },
+        },
+      );
+    } else if (IMAGE_FILE.test(file) || probeImage(data)) {
       let image;
       try {
         image = prepareImage(data);

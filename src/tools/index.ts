@@ -5,7 +5,15 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { AgentUI, Approve, ExitPlan, TodoItem } from '../types.js';
 import { redact } from '../redact.js';
-import { editText, listDirectory, readImage, readText, truncate, writeText } from './files.js';
+import {
+  editText,
+  listDirectory,
+  readDocument,
+  readImage,
+  readText,
+  truncate,
+  writeText,
+} from './files.js';
 import type { PreparedImage } from '../images.js';
 import type { Hooks } from '../hooks.js';
 import { globFiles, grepFiles } from './search.js';
@@ -108,7 +116,10 @@ export function isParallelSafe(name: string): boolean {
 
 export type SubagentRequest = z.infer<(typeof schemas)['task']>;
 
-export type ToolContent = { type: 'text'; text: string } | { type: 'image'; image: PreparedImage };
+export type ToolContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: PreparedImage }
+  | { type: 'document'; data: Buffer; pages: number };
 
 export interface ToolResult {
   content: string | ToolContent[];
@@ -144,7 +155,11 @@ export function resultText(result: ToolResult): string {
   if (typeof result.content === 'string') return result.content;
   return result.content
     .map((part) =>
-      part.type === 'text' ? part.text : `[Image ${part.image.width}×${part.image.height}]`,
+      part.type === 'text'
+        ? part.text
+        : part.type === 'image'
+          ? `[Image ${part.image.width}×${part.image.height}]`
+          : `[PDF, about ${part.pages} pages]`,
     )
     .join('\n');
 }
@@ -296,6 +311,19 @@ export class ToolRunner {
         }
         case 'read_file': {
           const request = schemas.read_file.parse(value);
+          const document = await readDocument(cwd, request.path, policy);
+          if (document)
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: redact(
+                    `PDF ${document.path} (about ${document.pages} page${document.pages === 1 ? '' : 's'}, ${kilobytes(document.data.length)})`,
+                  ),
+                },
+                { type: 'document', data: document.data, pages: document.pages },
+              ],
+            };
           const image = await readImage(cwd, request.path, policy);
           if (image)
             return {

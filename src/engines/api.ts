@@ -388,14 +388,23 @@ async function toolResultBlock(
           result.content.map(async (part) =>
             part.type === 'text'
               ? { type: 'text' as const, text: part.text }
-              : {
-                  type: 'image' as const,
-                  source: {
-                    type: 'base64' as const,
-                    media_type: part.image.mediaType,
-                    data: await storeBlob(session.id, part.image.data),
+              : part.type === 'document'
+                ? {
+                    type: 'document' as const,
+                    source: {
+                      type: 'base64' as const,
+                      media_type: 'application/pdf' as const,
+                      data: await storeBlob(session.id, part.data),
+                    },
+                  }
+                : {
+                    type: 'image' as const,
+                    source: {
+                      type: 'base64' as const,
+                      media_type: part.image.mediaType,
+                      data: await storeBlob(session.id, part.image.data),
+                    },
                   },
-                },
           ),
         );
   return {

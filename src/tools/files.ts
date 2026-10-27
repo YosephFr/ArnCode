@@ -62,6 +62,44 @@ const IMAGE_MAGIC = [
   Buffer.from('RIFF'),
 ];
 
+const MAX_PDF_BYTES = 12 * 1024 * 1024;
+const MAX_PDF_PAGES = 100;
+
+/** A rough page count from the PDF's page objects; enough to warn before an expensive read. */
+export function estimatePdfPages(data: Buffer): number {
+  return (data.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
+}
+
+/** Read a PDF for the model, or return undefined when the file is not one. */
+export async function readDocument(
+  cwd: string,
+  input: string,
+  policy?: PathPolicy,
+): Promise<{ path: string; data: Buffer; pages: number } | undefined> {
+  const file = await projectPath(cwd, input, false, policy);
+  const info = await stat(file);
+  if (!info.isFile()) return undefined;
+  const handle = await open(file, 'r');
+  try {
+    const head = Buffer.alloc(5);
+    await handle.read(head, 0, 5, 0);
+    if (head.toString('latin1') !== '%PDF-') return undefined;
+    if (info.size > MAX_PDF_BYTES)
+      throw new Error(
+        'PDF exceeds 12 MiB. Extract the pages you need first, for example with pdftotext or qpdf.',
+      );
+    const data = await handle.readFile();
+    const pages = estimatePdfPages(data);
+    if (pages > MAX_PDF_PAGES)
+      throw new Error(
+        `PDF has about ${pages} pages; the limit is ${MAX_PDF_PAGES}. Extract the pages you need first, for example with qpdf --pages.`,
+      );
+    return { path: path.relative(cwd, file), data, pages };
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Read an image file for the model, or return undefined when the file is not an image. */
 export async function readImage(
   cwd: string,

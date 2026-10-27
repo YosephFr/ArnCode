@@ -153,3 +153,40 @@ describe('reading images with read_file', () => {
     expect((await runner.run('read_file', { path: 'plain.txt' })).content).toBe('1: hello');
   });
 });
+
+describe('PDF documents', () => {
+  const fixture = path.join(
+    path.dirname(new URL(import.meta.url).pathname),
+    'fixtures/two-pages.pdf',
+  );
+
+  it('reads PDFs as documents and attaches them from mentions', async () => {
+    const { copyFile } = await import('node:fs/promises');
+    await copyFile(fixture, path.join(project, 'spec.pdf'));
+    const runner = new ToolRunner({
+      cwd: project,
+      approve: async () => ({ allowed: true }),
+      ui: {
+        text: () => {},
+        endText: () => {},
+        status: () => {},
+        idle: () => {},
+        notice: () => {},
+        progress: () => {},
+        toolResult: () => {},
+        tool: () => {},
+        diff: () => {},
+      },
+    });
+    const result = await runner.run('read_file', { path: 'spec.pdf' });
+    expect(result.content).toEqual([
+      { type: 'text', text: expect.stringMatching(/^PDF spec\.pdf \(about 2 pages, /) },
+      { type: 'document', data: expect.any(Buffer), pages: 2 },
+    ]);
+    const attached = await attachMentions('Summarize @spec.pdf', { cwd: project, sessionId: 's' });
+    expect(attached?.content[1]).toMatchObject({
+      type: 'document',
+      source: { media_type: 'application/pdf', data: expect.stringMatching(/^arncode-blob:/) },
+    });
+  });
+});
