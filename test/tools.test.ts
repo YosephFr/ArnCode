@@ -296,8 +296,19 @@ describe('background commands', () => {
       `${id} is running.\n[No new output]`,
     );
     expect((await runner.run('kill_shell', { id })).content).toBe(`Stopped ${id}.`);
-    await delay(100);
-    expect(() => process.kill(child, 0)).toThrow();
+    // A busy machine can take a moment to reap the stopped process.
+    const gone = async () => {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        try {
+          process.kill(child, 0);
+        } catch {
+          return true;
+        }
+        await delay(100);
+      }
+      return false;
+    };
+    expect(await gone()).toBe(true);
     expect((await runner.run('bash_output', { id })).is_error).toBe(true);
   });
 });

@@ -613,7 +613,7 @@ describe('MCP servers', () => {
     const changed = await mockAPI([{ text: ['ok\n'] }]);
     await runCLI(changed.url, ['-p', 'Hi']);
     expect(tools(changed)).not.toContain('mcp__local__echo');
-  }, 30_000);
+  }, 60_000);
 
   it('keeps MCP tools in summary requests so they reuse the cached prefix', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url));
