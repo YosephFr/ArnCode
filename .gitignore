@@ -8,3 +8,4 @@ coverage/
 .arncode/
 credentials.json
 .DS_Store
+.claude/
