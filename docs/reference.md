@@ -199,6 +199,35 @@ Costs are estimates based on known model pricing or the SDK's reported estimate.
 
 OAuth persists observed streamed tokens as unpriced usage while a run is active. The final SDK result reconciles token counts and cost without counting them twice. If the run is interrupted, observed tokens remain recorded with cost unavailable.
 
+### Hooks
+
+Hooks run your shell commands at points in a session, in the format Claude Code uses, so existing command hooks can be copied over. Add them to `~/.arncode/config.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/bin/guard-shell" }] }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "npx prettier --write ." }]
+      }
+    ]
+  }
+}
+```
+
+| Event              | Runs                              | Exit code 2 or `"decision": "block"`                  |
+| ------------------ | --------------------------------- | ----------------------------------------------------- |
+| `UserPromptSubmit` | Before a prompt is sent           | Stops the request; other output is added as context   |
+| `PreToolUse`       | Before a tool runs                | Blocks the call; the reason goes to the model         |
+| `PostToolUse`      | After a tool runs                 | Shows the reason to the model as feedback             |
+| `Stop`             | When the agent finishes its reply | Sends the reason back as a request, up to three times |
+
+Each hook receives JSON on stdin with `session_id`, `cwd`, `hook_event_name`, and, for tool events, `tool_name` and `tool_input` (`tool_response` after the call). Matchers are regular expressions over tool names as Claude Code names them: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Task`, `TodoWrite`, `WebSearch`, and `WebFetch`, in both auth modes. A hook can also print `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}` or `additionalContext`. Hooks time out after 60 seconds unless `timeout` (seconds) says otherwise. They load from your configuration only; hooks defined inside a project are not run, so opening a repository never executes its commands.
+
 ### Protected paths
 
 `protectedPaths` adds exclusions for file reads, writes, edits, directory listings, and searches in both auth modes:

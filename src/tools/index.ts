@@ -7,6 +7,7 @@ import type { AgentUI, Approve, ExitPlan, TodoItem } from '../types.js';
 import { redact } from '../redact.js';
 import { editText, listDirectory, readImage, readText, truncate, writeText } from './files.js';
 import type { PreparedImage } from '../images.js';
+import type { Hooks } from '../hooks.js';
 import { globFiles, grepFiles } from './search.js';
 import { runProcess } from './process.js';
 import { loadSkill } from '../skills.js';
@@ -161,13 +162,40 @@ export class ToolRunner {
       subagent?: (input: SubagentRequest, signal?: AbortSignal) => Promise<ToolResult>;
       /** Tools this runner may execute; every tool when absent. */
       allowedTools?: readonly string[];
+      hooks?: Hooks;
     },
   ) {}
 
   async run(name: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
     const started = Date.now();
+    const { hooks } = this.options;
+    const args = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
     try {
+      if (hooks?.has('PreToolUse')) {
+        const outcome = await hooks.run('PreToolUse', { tool_input: args }, { tool: name, signal });
+        if (outcome.blocked) {
+          this.options.ui.tool(name, args);
+          const blocked = { content: `Blocked by a hook: ${outcome.blocked}`, is_error: true };
+          this.options.ui.toolResult(name, blocked.content, { isError: true });
+          return blocked;
+        }
+      }
       const result = await this.execute(name, input, signal);
+      if (hooks?.has('PostToolUse')) {
+        const outcome = await hooks.run(
+          'PostToolUse',
+          { tool_input: args, tool_response: resultText(result).slice(0, 20_000) },
+          { tool: name, signal },
+        );
+        const feedback = outcome.blocked ?? outcome.context;
+        if (feedback) {
+          const note = { type: 'text' as const, text: `Hook feedback: ${feedback}` };
+          result.content =
+            typeof result.content === 'string'
+              ? `${result.content}\n\n${note.text}`
+              : [...result.content, note];
+        }
+      }
       this.options.ui.toolResult(name, resultText(result), {
         isError: result.is_error,
         durationMs: Date.now() - started,

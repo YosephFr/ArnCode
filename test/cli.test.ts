@@ -523,6 +523,67 @@ describe('offline CLI journeys', () => {
   }, 30_000);
 });
 
+describe('hooks', () => {
+  it('runs configured hooks around prompts, tools and the end of a turn', async () => {
+    const hooks = path.join(temporary, 'hooks');
+    await mkdir(hooks);
+    await writeFile(
+      path.join(hooks, 'guard.sh'),
+      'input=$(cat); if printf %s "$input" | grep -q "rm -rf"; then echo "deletes are not allowed" >&2; exit 2; fi\n',
+    );
+    await writeFile(
+      path.join(hooks, 'format.sh'),
+      'cat >/dev/null; echo "run the formatter" >&2; exit 2\n',
+    );
+    await writeFile(
+      path.join(hooks, 'stop.sh'),
+      `cat >/dev/null; if [ ! -f ${hooks}/stopped ]; then touch ${hooks}/stopped; echo "also add a test" >&2; exit 2; fi\n`,
+    );
+    await mkdir(config, { recursive: true });
+    await writeFile(
+      path.join(config, 'config.json'),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo "Context from hook"' }] }],
+          PreToolUse: [
+            { matcher: 'Bash', hooks: [{ type: 'command', command: `bash ${hooks}/guard.sh` }] },
+          ],
+          PostToolUse: [
+            { matcher: 'Write', hooks: [{ type: 'command', command: `bash ${hooks}/format.sh` }] },
+          ],
+          Stop: [{ hooks: [{ type: 'command', command: `bash ${hooks}/stop.sh` }] }],
+        },
+      }),
+    );
+    const api = await mockAPI([
+      { tool: { name: 'bash', id: 'delete', input: { command: 'rm -rf build' } } },
+      { tool: { name: 'write_file', id: 'note', input: { path: 'note.txt', content: 'x' } } },
+      { text: ['Done.\n'] },
+      { text: ['Added the test.\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Clean up.']);
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toBe('Done.\nAdded the test.\n');
+    expect(JSON.stringify(api.requests[0]!.body.messages)).toContain('Context from hook');
+    expect(api.requests[1]!.body.messages.at(-1)).toMatchObject({
+      content: [
+        {
+          tool_use_id: 'delete',
+          is_error: true,
+          content: expect.stringContaining('deletes are not allowed'),
+        },
+      ],
+    });
+    expect(JSON.stringify(api.requests[2]!.body.messages.at(-1))).toContain(
+      'Hook feedback: run the formatter',
+    );
+    expect(JSON.stringify(api.requests[3]!.body.messages)).toContain(
+      'A hook asked to continue: also add a test',
+    );
+    expect(api.requests).toHaveLength(4);
+  }, 30_000);
+});
+
 describe('official-endpoint API features', () => {
   const full = { ARNCODE_API_FEATURES: 'full' };
 

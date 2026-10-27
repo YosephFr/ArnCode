@@ -1,3 +1,4 @@
+import type { HooksConfig } from './hooks.js';
 export type AuthMode = 'api-key' | 'oauth';
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type PermissionMode = 'full' | 'edits' | 'ask' | 'plan';
@@ -28,6 +29,8 @@ export interface Settings {
   webTools: boolean;
   permissionMode: PermissionMode;
   protectedPaths: string[];
+  /** Command hooks from the user's configuration. */
+  hooks?: HooksConfig;
 }
 
 export interface TodoItem {

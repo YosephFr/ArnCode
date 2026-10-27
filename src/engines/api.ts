@@ -517,6 +517,7 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
     ui,
     protectedPaths: settings.protectedPaths,
     allowedTools: session.api?.tools,
+    hooks: ctx.hooks,
     ...(session.api?.tools && !session.api.tools.includes('task')
       ? {}
       : { subagent: (request, abort) => runSubagent(ctx, request, abort) }),

@@ -16,6 +16,7 @@ import {
 import { addUsage, emptyUsage, type UsageTotals } from './usage.js';
 import type { AgentUI, Approve, ExitPlan, Settings } from './types.js';
 import { redact } from './redact.js';
+import { Hooks } from './hooks.js';
 
 interface RunOptions {
   settings: Settings;
@@ -48,8 +49,15 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
     throw new Error(
       'No enabled credentials match. Run arncode creds add <name> or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN.',
     );
+  const hooks = new Hooks(settings.hooks, { cwd: settings.cwd, sessionId: () => session.id });
+  let promptText = options.prompt;
+  if (hooks.has('UserPromptSubmit')) {
+    const outcome = await hooks.run('UserPromptSubmit', { prompt: options.prompt }, { signal });
+    if (outcome.blocked) throw new Error(`A hook blocked this request: ${outcome.blocked}`);
+    if (outcome.context) promptText += `\n\n${outcome.context}`;
+  }
   closePendingTools(session);
-  const userPrompt = redact(options.prompt);
+  const userPrompt = redact(promptText);
   appendTranscript(session, 'user', userPrompt);
   session.messages.push({ role: 'user', content: userPrompt });
   session.model = settings.model;
@@ -78,6 +86,7 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
       prompt: userPrompt,
       ui,
       approve: options.approve,
+      hooks,
       exitPlan: options.exitPlan,
       signal,
       budget,
@@ -104,6 +113,17 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
             ? portableContext(session)
             : userPrompt;
         await engines.oauth(ctx, prompt);
+      }
+      // A Stop hook that exits with code 2 sends the agent back to work, a bounded number of times.
+      for (let round = 0; round < 3 && hooks.has('Stop'); round++) {
+        const outcome = await hooks.run('Stop', { stop_hook_active: round > 0 }, { signal });
+        if (!outcome.blocked) break;
+        const request = redact(`A hook asked to continue: ${outcome.blocked}`);
+        ui.notice(request);
+        appendTranscript(session, 'user', request);
+        session.messages.push({ role: 'user', content: request });
+        if (credential.type === 'api-key') await engines['api-key'](ctx);
+        else await engines.oauth(ctx, portableContext(session));
       }
       if (options.ignoreCooldown) await meter.reset(credential);
       await save(session);

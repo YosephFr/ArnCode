@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { loadCredentialCandidates } from './auth.js';
+import { hooksSchema } from './hooks.js';
 import { atomicWriteJson, readJson, withFileLock } from './storage.js';
 import type { Settings } from './types.js';
 
@@ -41,6 +42,7 @@ const userConfigSchema = z
     maxTurns: z.number().int().min(1).max(1000).optional(),
     compactAt: z.number().int().min(20_000).max(10_000_000).optional(),
     webTools: z.boolean().optional(),
+    hooks: hooksSchema.optional(),
     permissionMode: z.enum(['full', 'edits', 'ask', 'plan']).optional(),
     protectedPaths: z
       .array(
@@ -147,6 +149,7 @@ export function resolveSettings(
   return {
     ...DEFAULTS,
     ...settings,
+    ...(config.hooks ? { hooks: config.hooks } : {}),
     protectedPaths: [...new Set([...DEFAULT_PROTECTED_PATHS, ...configuredPaths, ...flagPaths])],
     cwd: resolve(flags.cwd ?? process.cwd()),
     ...(explicitAuth ? { authRestriction: authSchema.parse(explicitAuth) } : {}),

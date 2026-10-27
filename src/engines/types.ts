@@ -1,4 +1,5 @@
 import type { Credential } from '../auth.js';
+import type { Hooks } from '../hooks.js';
 import type { Session } from '../session.js';
 import type { UsageTotals } from '../usage.js';
 import type { AgentUI, Approve, ExitPlan, Settings } from '../types.js';
@@ -11,6 +12,8 @@ export interface EngineContext {
   prompt?: string;
   ui: AgentUI;
   approve: Approve;
+  /** The user's command hooks. */
+  hooks?: Hooks;
   /** Ask the user to approve a finished plan; absent when nobody can answer. */
   exitPlan?: ExitPlan;
   signal: AbortSignal;

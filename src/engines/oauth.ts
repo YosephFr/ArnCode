@@ -136,6 +136,25 @@ export async function oauthOptions(
         },
       };
     }
+    if (ctx.hooks?.has('PreToolUse')) {
+      const outcome = await ctx.hooks.run(
+        'PreToolUse',
+        { tool_input: args },
+        { tool: input.tool_name, signal: ctx.signal },
+      );
+      if (outcome.blocked) {
+        const reason = `Blocked by a hook: ${outcome.blocked}`;
+        ctx.ui.notice(reason);
+        activity();
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: reason,
+          },
+        };
+      }
+    }
     const decision = await ctx.approve(input.tool_name, args, ctx.signal);
     approved.set(input.tool_use_id, decision);
     if (!decision.allowed) {
@@ -216,8 +235,23 @@ export async function oauthOptions(
           typeof value === 'string' ? redact(value) : value,
         ),
       );
+      const outcome = ctx.hooks?.has('PostToolUse')
+        ? await ctx.hooks.run(
+            'PostToolUse',
+            {
+              tool_input: record(input.tool_input),
+              tool_response: redact(text ?? '').slice(0, 20_000),
+            },
+            { tool: input.tool_name, signal: ctx.signal },
+          )
+        : {};
+      const feedback = outcome.blocked ?? outcome.context;
       return {
-        hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: safeOutput },
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          updatedToolOutput: safeOutput,
+          ...(feedback ? { additionalContext: `Hook feedback: ${feedback}` } : {}),
+        },
       };
     }
     return {};
