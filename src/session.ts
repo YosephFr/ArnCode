@@ -172,9 +172,15 @@ export function apiContext(messages: BetaMessageParam[], maxChars = 500_000): Be
       ...message,
       content: message.content.map((block) => {
         if (block.type !== 'tool_result') return block;
-        const text =
-          typeof block.content === 'string' ? block.content : JSON.stringify(block.content ?? '');
-        return { ...block, content: shorten(text, perResult) };
+        if (typeof block.content === 'string')
+          return { ...block, content: shorten(block.content, perResult) };
+        // Only text is shortened; images are kept as stored references.
+        return {
+          ...block,
+          content: block.content?.map((part) =>
+            part.type === 'text' ? { ...part, text: shorten(part.text, perResult) } : part,
+          ),
+        };
       }),
     };
   });

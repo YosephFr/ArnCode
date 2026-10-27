@@ -14,6 +14,7 @@ import type {
   RawMessageStreamEvent,
   StopReason,
 } from '@anthropic-ai/sdk/resources/messages';
+import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 type MockBlock =
@@ -631,6 +632,59 @@ describe('official-endpoint API features', () => {
     expect(JSON.parse(await readFile(path.join(config, 'sessions', file!), 'utf8'))).toMatchObject({
       compactions: 1,
     });
+  }, 30_000);
+
+  it('lets the model look at rendered frames and attached images', async () => {
+    const frame = new PNG({ width: 64, height: 36 });
+    for (let index = 0; index < frame.data.length; index += 4) {
+      frame.data.fill(index % 255, index, index + 3);
+      frame.data[index + 3] = 255;
+    }
+    const bytes = PNG.sync.write(frame);
+    await writeFile(path.join(project, 'frame.png'), bytes);
+    await writeFile(path.join(project, 'mock.png'), bytes);
+    const api = await mockAPI([
+      { tool: { name: 'read_file', id: 'look', input: { path: 'frame.png' } } },
+      { text: ['The frame is a gradient.\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Compare the render with @mock.png'], '', full);
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stderr).toContain('Attached mock.png');
+    expect(run.stderr).toContain('Image frame.png (64×36 PNG');
+    const data = bytes.toString('base64');
+    expect(api.requests[0]!.body.messages[0]).toMatchObject({
+      role: 'user',
+      content: [
+        { type: 'text', text: expect.stringContaining('Image mock.png') },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data } },
+        { type: 'text', text: 'Compare the render with @mock.png' },
+      ],
+    });
+    expect(api.requests[1]!.body.messages.at(-1)).toMatchObject({
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'look',
+          content: [
+            { type: 'text', text: expect.stringContaining('Image frame.png') },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data } },
+          ],
+        },
+      ],
+    });
+    const files = await readdir(path.join(config, 'sessions'));
+    const session = await readFile(
+      path.join(
+        config,
+        'sessions',
+        files.find((name) => name.endsWith('.json'))!,
+      ),
+      'utf8',
+    );
+    expect(session).not.toContain(data);
+    expect(session).toContain('arncode-blob:');
+    expect(session).toContain('[Image 64×36]');
+    expect(files.some((name) => name.endsWith('.blobs'))).toBe(true);
   }, 30_000);
 
   it('reports refusal fallbacks and explains final refusals', async () => {

@@ -72,6 +72,7 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
       settings: { ...settings, auth: credential.type },
       session,
       credential,
+      prompt: userPrompt,
       ui,
       approve: options.approve,
       signal,

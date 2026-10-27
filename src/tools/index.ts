@@ -2,7 +2,8 @@ import { realpath } from 'node:fs/promises';
 import { z } from 'zod';
 import type { AgentUI, Approve } from '../types.js';
 import { redact } from '../redact.js';
-import { editText, listDirectory, readText, truncate, writeText } from './files.js';
+import { editText, listDirectory, readImage, readText, truncate, writeText } from './files.js';
+import type { PreparedImage } from '../images.js';
 import { globFiles, grepFiles } from './search.js';
 import { runProcess } from './process.js';
 import { loadSkill } from '../skills.js';
@@ -61,9 +62,39 @@ export function isParallelSafe(name: string): boolean {
   return parallelSafe.has(name);
 }
 
+export type ToolContent = { type: 'text'; text: string } | { type: 'image'; image: PreparedImage };
+
 export interface ToolResult {
-  content: string;
+  content: string | ToolContent[];
   is_error?: boolean;
+}
+
+function kilobytes(bytes: number): string {
+  return `${Math.max(1, Math.round(bytes / 1024)).toLocaleString('en-US')} KB`;
+}
+
+function format(mediaType: string): string {
+  return mediaType.replace('image/', '').toUpperCase();
+}
+
+export function describeImage(file: string, image: PreparedImage): string {
+  const { original } = image;
+  const source = `${original.width}×${original.height} ${format(original.mediaType)}, ${kilobytes(original.bytes)}`;
+  const sent =
+    image.data.length === original.bytes
+      ? ''
+      : `; sent as ${image.width}×${image.height} ${format(image.mediaType)}, ${kilobytes(image.data.length)}`;
+  return `Image ${file} (${source}${sent})`;
+}
+
+/** Text form of a result, for transcripts, terminal output and text-only consumers. */
+export function resultText(result: ToolResult): string {
+  if (typeof result.content === 'string') return result.content;
+  return result.content
+    .map((part) =>
+      part.type === 'text' ? part.text : `[Image ${part.image.width}×${part.image.height}]`,
+    )
+    .join('\n');
 }
 
 export class ToolRunner {
@@ -82,11 +113,13 @@ export class ToolRunner {
       const result = await this.execute(name, input, signal);
       if (name === 'bash' || result.is_error) {
         this.options.ui.notice(
-          formatToolResult(name, result.content, {
+          formatToolResult(name, resultText(result), {
             isError: result.is_error,
             durationMs: Date.now() - started,
           }),
         );
+      } else if (typeof result.content !== 'string') {
+        this.options.ui.notice(resultText(result).split('\n')[0] ?? '');
       }
       return result;
     } finally {
@@ -130,9 +163,19 @@ export class ToolRunner {
             ),
           };
         }
-        case 'read_file':
-          content = await readText(cwd, schemas.read_file.parse(value), signal, policy);
+        case 'read_file': {
+          const request = schemas.read_file.parse(value);
+          const image = await readImage(cwd, request.path, policy);
+          if (image)
+            return {
+              content: [
+                { type: 'text', text: redact(describeImage(image.path, image.image)) },
+                { type: 'image', image: image.image },
+              ],
+            };
+          content = await readText(cwd, request, signal, policy);
           break;
+        }
         case 'write_file':
           content = await writeText(cwd, schemas.write_file.parse(value), this.options.ui, policy);
           break;

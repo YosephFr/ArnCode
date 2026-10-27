@@ -10,12 +10,20 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import type { BetaMessageStream } from '@anthropic-ai/sdk/lib/BetaMessageStream';
 import type { MessageStreamParams } from '@anthropic-ai/sdk/resources/messages/messages';
+import { attachMentions } from '../attachments.js';
 import { withRetry } from '../backoff.js';
+import { hydrateMessages, referencedBytes, storeBlob } from '../blobs.js';
 import { classifyCredentialFailure } from '../failures.js';
 import { modelEffort, modelFeatures } from '../models.js';
 import { appendTranscript, apiContext, type Session } from '../session.js';
 import { systemPrompt } from '../prompt.js';
-import { ToolRunner, isParallelSafe, toolDefinitions, type ToolResult } from '../tools/index.js';
+import {
+  ToolRunner,
+  isParallelSafe,
+  resultText,
+  toolDefinitions,
+  type ToolResult,
+} from '../tools/index.js';
 import { usageFromAPI } from '../usage.js';
 import type { Settings } from '../types.js';
 import type { EngineContext } from './types.js';
@@ -34,6 +42,9 @@ const BETA = {
   messageEffort: 'mid-conversation-output-config-2026-07-01',
   fast: 'fast-mode-2026-02-01',
 } as const;
+
+// Requests are capped at 32 MB; images are resent with every request until a summary drops them.
+const MAX_IMAGE_BYTES = 18_000_000;
 
 const CONTINUE_AFTER_SUMMARY =
   'Continue the task from the summary above. Inspect files before repeating an edit or command.';
@@ -288,6 +299,7 @@ export async function compactConversation(
         const params = apiRequest(settings, { ...session, messages: history }, mode, {
           compaction: true,
         });
+        params.messages = await hydrateMessages(params.messages, session.id);
         return openStream(client, params, mode, signal).finalMessage();
       },
       { signal, onRetry: async ({ failure }) => ctx.onRetryError?.(failure) },
@@ -318,11 +330,32 @@ export async function compactConversation(
   }
 }
 
-function toolResultBlock(call: BetaToolUseBlock, result: ToolResult): BetaToolResultBlockParam {
+async function toolResultBlock(
+  session: Session,
+  call: BetaToolUseBlock,
+  result: ToolResult,
+): Promise<BetaToolResultBlockParam> {
+  const content =
+    typeof result.content === 'string'
+      ? result.content
+      : await Promise.all(
+          result.content.map(async (part) =>
+            part.type === 'text'
+              ? { type: 'text' as const, text: part.text }
+              : {
+                  type: 'image' as const,
+                  source: {
+                    type: 'base64' as const,
+                    media_type: part.image.mediaType,
+                    data: await storeBlob(session.id, part.image.data),
+                  },
+                },
+          ),
+        );
   return {
     type: 'tool_result',
     tool_use_id: call.id,
-    content: result.content,
+    content,
     ...(result.is_error ? { is_error: true } : {}),
   };
 }
@@ -341,6 +374,20 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
     ui,
     protectedPaths: settings.protectedPaths,
   });
+  const latest = session.messages.at(-1);
+  if (ctx.prompt && latest?.role === 'user' && latest.content === ctx.prompt) {
+    const attachment = await attachMentions(ctx.prompt, {
+      cwd: settings.cwd,
+      sessionId: session.id,
+      protectedPaths: settings.protectedPaths,
+    });
+    for (const reason of attachment?.skipped ?? []) ui.notice(`Not attached: ${reason}`);
+    if (attachment?.attached.length) {
+      latest.content = attachment.content;
+      appendTranscript(session, 'user', `[Attached: ${attachment.attached.join(', ')}]`);
+      ui.notice(`Attached ${attachment.attached.join(', ')}`);
+    }
+  }
   if (
     session.api &&
     canCompact(settings, mode) &&
@@ -363,7 +410,9 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
       message = await withRetry(
         async () => {
           await ctx.onRequest();
-          const stream = openStream(client, apiRequest(settings, session, mode), mode, signal);
+          const params = apiRequest(settings, session, mode);
+          params.messages = await hydrateMessages(params.messages, session.id);
+          const stream = openStream(client, params, mode, signal);
           stream.on('text', (text) => {
             partialText += text;
             ui.text(text);
@@ -468,15 +517,15 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
               : runner.run(call.name, call.input, signal),
           ),
         );
-        group.forEach((call, index) => {
+        for (const [index, call] of group.entries()) {
           const outcome = outcomes[index]!;
-          results.push(toolResultBlock(call, outcome));
+          results.push(await toolResultBlock(session, call, outcome));
           appendTranscript(
             session,
             'tool',
-            `${call.name} ${JSON.stringify(call.input)}\n${outcome.content}`,
+            `${call.name} ${JSON.stringify(call.input)}\n${resultText(outcome)}`,
           );
-        });
+        }
         const remaining = calls.slice(results.length).map((pending): BetaToolResultBlockParam => ({
           type: 'tool_result',
           tool_use_id: pending.id,
@@ -495,7 +544,8 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
       signal.throwIfAborted();
       if (
         canCompact(settings, mode) &&
-        session.contextTokens > compactionLimit(settings) &&
+        (session.contextTokens > compactionLimit(settings) ||
+          referencedBytes(session.messages) > MAX_IMAGE_BYTES) &&
         (await compactConversation(ctx, client))
       ) {
         session.messages.push({ role: 'user', content: CONTINUE_AFTER_SUMMARY });

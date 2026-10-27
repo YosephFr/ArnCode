@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { AgentUI } from '../types.js';
 import { redact } from '../redact.js';
+import { prepareImage, probeImage, type PreparedImage } from '../images.js';
 import {
   createPathPolicy,
   ensureDirectory,
@@ -49,6 +50,41 @@ async function atomicWrite(file: string, content: string): Promise<void> {
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });
+  }
+}
+
+const IMAGE_MAGIC = [
+  Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+  Buffer.from([0xff, 0xd8, 0xff]),
+  Buffer.from('GIF8'),
+  Buffer.from('RIFF'),
+];
+
+/** Read an image file for the model, or return undefined when the file is not an image. */
+export async function readImage(
+  cwd: string,
+  input: string,
+  policy?: PathPolicy,
+): Promise<{ path: string; image: PreparedImage } | undefined> {
+  const file = await projectPath(cwd, input, false, policy);
+  const info = await stat(file);
+  if (!info.isFile()) return undefined;
+  const handle = await open(file, 'r');
+  try {
+    const head = Buffer.alloc(16);
+    const { bytesRead } = await handle.read(head, 0, head.length, 0);
+    if (
+      !IMAGE_MAGIC.some((magic) =>
+        head.subarray(0, bytesRead).subarray(0, magic.length).equals(magic),
+      )
+    )
+      return undefined;
+    if (info.size > 50 * 1024 * 1024) throw new Error('Image exceeds the 50 MiB read limit.');
+    const data = await handle.readFile();
+    if (!probeImage(data)) return undefined;
+    return { path: path.relative(cwd, file), image: prepareImage(data) };
+  } finally {
+    await handle.close();
   }
 }
 

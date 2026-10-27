@@ -12,7 +12,7 @@ import { appendTranscript, portableContext } from '../session.js';
 import { systemPrompt } from '../prompt.js';
 import { emptyUsage, type UsageTotals } from '../usage.js';
 import { createPathPolicy, projectPath } from '../tools/paths.js';
-import { ToolRunner, toolSchemas } from '../tools/index.js';
+import { ToolRunner, resultText, toolSchemas } from '../tools/index.js';
 import { discoverSkills, loadSkill } from '../skills.js';
 import { z } from 'zod';
 import { redact, StreamingRedactor } from '../redact.js';
@@ -241,7 +241,10 @@ export async function oauthOptions(
   });
   const searchResult = async (name: 'glob' | 'grep', args: unknown) => {
     const result = await search.run(name, args, ctx.signal);
-    return { content: [{ type: 'text' as const, text: result.content }], isError: result.is_error };
+    return {
+      content: [{ type: 'text' as const, text: resultText(result) }],
+      isError: result.is_error,
+    };
   };
   const mcpServers: NonNullable<Options['mcpServers']> = {
     arncode: createSdkMcpServer({

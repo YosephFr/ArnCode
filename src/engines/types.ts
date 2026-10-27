@@ -7,6 +7,8 @@ export interface EngineContext {
   settings: Settings;
   session: Session;
   credential: Credential;
+  /** The user's prompt for this turn, when the turn started from one. */
+  prompt?: string;
   ui: AgentUI;
   approve: Approve;
   signal: AbortSignal;

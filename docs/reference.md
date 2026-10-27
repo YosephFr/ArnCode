@@ -175,7 +175,9 @@ The API backend provides `read_file`, `write_file`, `edit_file`, `list_dir`, `gl
 
 Read ranges, searches, and command output are bounded. Shell timeouts default to two minutes and can be requested up to thirty minutes. The managed process group is stopped on timeout, cancellation, or shell exit, so API tools do not support persistent background servers. Linux and macOS support this process-group cleanup; use WSL on Windows.
 
-Image inspection is currently available through the OAuth SDK's native Read tool. API-key file tools read text and do not return image content to the model.
+`read_file` returns PNG, JPEG, GIF, and WebP files as images. Images that fit the model's limits (2,000 px on the longest side, its visual-token budget, and 1 MB) are sent unchanged; larger PNG and JPEG files are downscaled and re-encoded in process, as JPEG unless they have transparency. Each image is stored once beside its saved session and resent unchanged on later requests; the saved conversation keeps only a reference. When stored images approach the request size limit, the conversation is summarized. OAuth sessions use the SDK's native Read tool for images.
+
+In API-key sessions, a prompt can attach files: `@path` or `@"path with spaces"` mentions attach images and inline text files (up to 200 kB), and image paths pasted or dropped into the terminal are attached too. Protected paths are never attached.
 
 OAuth uses SDK-native Read, Write, Edit, and Bash tools, plus ArnCode's guarded searches and skill loader. Full mode bypasses ArnCode approvals; ask mode applies its prompts through SDK hooks and callbacks. SDK-enforced restrictions still apply.
 
