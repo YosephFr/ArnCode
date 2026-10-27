@@ -4,7 +4,8 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { proposedChange } from '../src/tools/files.js';
-import { expandBraces } from '../src/tools/search.js';
+import { expandBraces } from '../src/glob.js';
+import { systemPrompt } from '../src/prompt.js';
 import { ToolRunner } from '../src/tools/index.js';
 import { formatToolResult } from '../src/ui.js';
 import { createPathPolicy } from '../src/tools/paths.js';
@@ -278,6 +279,34 @@ describe('search in a git repository', () => {
       'src/**/*.md',
       'src/**/*.mdx',
     ]);
+  });
+});
+
+describe('untrusted repositories', () => {
+  it("never runs a repository's configured commands while searching or describing it", async () => {
+    const marker = path.join(directory, '..', `fsmonitor-ran-${path.basename(directory)}`);
+    await runner.run('bash', {
+      command: [
+        'git init -q',
+        'echo hi > a.txt',
+        `git config core.fsmonitor "touch ${marker}; echo"`,
+        // An embedded bare repository, as a clone can carry one.
+        'git init -q --bare evil',
+        'git -C evil config core.worktree .',
+        `git -C evil config core.fsmonitor "touch ${marker}; echo"`,
+        'echo x > evil/file.txt',
+        // A nested repository: its files must still be found.
+        'mkdir -p packages/lib && git -C packages/lib init -q && echo 1 > packages/lib/index.js',
+      ].join(' && '),
+    });
+    await runner.run('glob', { pattern: '**/*' });
+    await runner.run('grep', { pattern: 'hi', literal: true });
+    await runner.run('glob', { path: 'evil', pattern: '**/*' });
+    await systemPrompt(directory);
+    await expect(stat(marker)).rejects.toThrow();
+    expect(String((await runner.run('glob', { pattern: '**/*.js' })).content)).toContain(
+      'packages/lib/index.js',
+    );
   });
 });
 

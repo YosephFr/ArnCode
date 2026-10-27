@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir, platform, release } from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { getConfigDir } from './config.js';
+import { readGit } from './git.js';
 import { redact } from './redact.js';
 import { discoverSkills } from './skills.js';
 
@@ -48,26 +47,19 @@ ${await systemPrompt(cwd)}`;
 
 export const PLAN_MODE_OFF = 'Plan mode is off. You may change files and run commands again.';
 
-const run = promisify(execFile);
-
 /** Where the session runs, captured once so the cached system prompt stays the same. */
 async function environment(cwd: string): Promise<string> {
-  const git = (args: string[]) =>
-    run('git', args, { cwd, timeout: 2000 }).then(
-      ({ stdout }) => stdout.trim(),
-      () => undefined,
-    );
-  const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
-  const changes = branch === undefined ? undefined : await git(['status', '--porcelain']);
-  const changed = changes ? changes.split('\n').length : 0;
+  // Only the branch: `git status` can run a repository's filter commands.
+  const branch = await readGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, timeout: 2000 }).then(
+    (stdout) => stdout.trim(),
+    () => undefined,
+  );
   const shell = path.basename(process.env.SHELL ?? '') || 'sh';
   return [
     `Environment at the start of this session:`,
     `- Date: ${new Date().toLocaleDateString('en-CA')}`,
     `- Platform: ${platform()} ${release()}, shell ${shell}`,
-    branch === undefined
-      ? '- Not a Git repository'
-      : `- Git branch ${branch}, ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'no uncommitted changes'}`,
+    branch === undefined ? '- Not a Git repository' : `- Git branch ${branch}`,
   ].join('\n');
 }
 

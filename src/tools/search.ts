@@ -1,9 +1,9 @@
 import fg from 'fast-glob';
-import { execFile } from 'node:child_process';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { promisify } from 'node:util';
+import { globMatcher } from '../glob.js';
+import { readGit } from '../git.js';
 import { redact } from '../redact.js';
 import { createPathPolicy, ensureDirectory, isProtected, type PathPolicy } from './paths.js';
 import { runProcess } from './process.js';
@@ -18,60 +18,54 @@ const IGNORE = [
   '**/__pycache__/**',
 ];
 const MAX_FILES = 10_000;
-const run = promisify(execFile);
-
-/** Expand `{a,b}` alternatives, which git pathspecs do not support. */
-export function expandBraces(pattern: string, limit = 64): string[] {
-  const group = /\{([^{}]*)\}/.exec(pattern);
-  if (!group) return [pattern];
-  const expanded = group[1]!
-    .split(',')
-    .flatMap((part) =>
-      expandBraces(
-        pattern.slice(0, group.index) + part + pattern.slice(group.index + group[0].length),
-        limit,
-      ),
-    );
-  if (expanded.length > limit) throw new Error('Glob pattern has too many alternatives.');
-  return [...new Set(expanded)];
-}
 
 /**
- * Files git would show under `directory` that match `pattern`: tracked and untracked ones, minus
- * those .gitignore excludes. Undefined outside a work tree or inside an ignored directory, where
- * the caller walks the file system instead.
+ * What git shows under `directory`: tracked and untracked files minus those .gitignore excludes,
+ * and the nested repositories and submodules it lists as single entries. Undefined outside a
+ * work tree or inside an ignored directory, where the caller walks the file system instead.
  */
-async function gitFiles(
+async function gitListing(
   directory: string,
-  pattern: string,
   signal?: AbortSignal,
-): Promise<string[] | undefined> {
-  const options = { cwd: directory, signal, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 };
+): Promise<{ files: string[]; nested: string[] } | undefined> {
+  const options = { cwd: directory, signal, timeout: 10_000 };
   try {
-    const ignored = await run('git', ['check-ignore', '-q', '.'], options).then(
+    const ignored = await readGit(['check-ignore', '-q', '.'], options).then(
       () => true,
       (error: { code?: unknown }) => (error.code === 1 ? false : undefined),
     );
     if (ignored !== false) return undefined;
-    const { stdout } = await run(
-      'git',
-      [
-        'ls-files',
-        '-z',
-        '--cached',
-        '--others',
-        '--exclude-standard',
-        '--',
-        ...expandBraces(pattern).map((alternative) => `:(glob)${alternative}`),
-      ],
-      options,
-    );
-    return [...new Set(stdout.split('\0').filter(Boolean))];
-  } catch (error) {
+    const files = new Set<string>();
+    const nested = new Set<string>();
+    // Staged entries carry their mode: 160000 marks a submodule.
+    for (const record of (await readGit(['ls-files', '-z', '--stage'], options)).split('\0')) {
+      const tab = record.indexOf('\t');
+      if (tab < 0) continue;
+      (record.startsWith('160000') ? nested : files).add(record.slice(tab + 1));
+    }
+    // An untracked nested repository is listed once, as a directory with a trailing slash.
+    const others = await readGit(['ls-files', '-z', '--others', '--exclude-standard'], options);
+    for (const entry of others.split('\0').filter(Boolean))
+      (entry.endsWith('/') ? nested : files).add(entry.replace(/\/$/, ''));
+    return { files: [...files], nested: [...nested] };
+  } catch {
     signal?.throwIfAborted();
-    if (error instanceof Error && error.message.includes('too many alternatives')) throw error;
     return undefined;
   }
+}
+
+/** Every file below a directory, skipping dependency and build folders. */
+async function walk(directory: string, signal?: AbortSignal): Promise<string[]> {
+  signal?.throwIfAborted();
+  return fg('**/*', {
+    cwd: directory,
+    dot: true,
+    onlyFiles: true,
+    followSymbolicLinks: false,
+    suppressErrors: true,
+    absolute: true,
+    ignore: IGNORE,
+  });
 }
 
 function validatePattern(pattern: string): void {
@@ -89,12 +83,13 @@ async function collectFiles(
 ): Promise<{ files: string[]; truncated: boolean }> {
   signal?.throwIfAborted();
   validatePattern(pattern);
-  const listed = await gitFiles(directory, pattern, signal);
-  if (listed) {
+  const matches = globMatcher(pattern);
+  const listing = await gitListing(directory, signal);
+  if (listing) {
     const files: string[] = [];
-    for (const entry of listed) {
-      const target = path.resolve(directory, entry);
-      if (await isProtected(target, policy)) continue;
+    let truncated = false;
+    const consider = async (target: string) => {
+      if (truncated || (await isProtected(target, policy))) return;
       // Like the file-system walk, skip links; git also lists tracked files deleted since.
       if (
         !(await lstat(target).then(
@@ -102,11 +97,17 @@ async function collectFiles(
           () => false,
         ))
       )
-        continue;
-      if (files.length === MAX_FILES) return { files: files.sort(), truncated: true };
-      files.push(path.relative(cwd, target));
-    }
-    return { files: files.sort(), truncated: false };
+        return;
+      if (files.length === MAX_FILES) truncated = true;
+      else files.push(path.relative(cwd, target));
+    };
+    for (const entry of listing.files)
+      if (matches(entry)) await consider(path.resolve(directory, entry));
+    // Nested repositories and submodules are not part of this repository's listing.
+    for (const nested of listing.nested)
+      for (const target of await walk(path.resolve(directory, nested), signal))
+        if (matches(path.relative(directory, target))) await consider(target);
+    return { files: files.sort(), truncated };
   }
   const stream = Readable.from(
     fg.stream(pattern, {
