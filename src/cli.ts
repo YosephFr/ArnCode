@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander';
-import fg from 'fast-glob';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { credentialCommands, integer } from './commands/credentials.js';
@@ -29,6 +28,7 @@ import { TerminalUI, displayName, setDisplayRoot, toolSummary } from './ui.js';
 import { formatUsage } from './usage.js';
 import { MeterStore } from './metering.js';
 import { proposedChange } from './tools/files.js';
+import { projectFiles } from './tools/search.js';
 import { usageDifference } from './engines/oauth.js';
 import { JsonUI, type OutputFormat } from './json-output.js';
 import type { ExitPlan, PermissionMode, Settings } from './types.js';
@@ -425,17 +425,7 @@ program.action(async (options: CliOptions) => {
   // Files for @ completion; refreshed after each turn without blocking input.
   let files: string[] = [];
   const indexFiles = async () => {
-    files = await fg('**/*', {
-      cwd: settings.cwd,
-      dot: true,
-      onlyFiles: true,
-      deep: 12,
-      followSymbolicLinks: false,
-      suppressErrors: true,
-      ignore: ['**/.git/**', '**/node_modules/**', '**/dist/**', '**/build/**', '**/.env*'],
-    })
-      .then((found) => found.slice(0, 20_000))
-      .catch(() => files);
+    files = await projectFiles(settings.cwd, settings.protectedPaths).catch(() => files);
   };
   void indexFiles();
   const suggest = (text: string, cursor: number) => {

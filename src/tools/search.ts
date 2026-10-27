@@ -1,12 +1,78 @@
 import fg from 'fast-glob';
+import { execFile } from 'node:child_process';
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { promisify } from 'node:util';
 import { redact } from '../redact.js';
 import { createPathPolicy, ensureDirectory, isProtected, type PathPolicy } from './paths.js';
 import { runProcess } from './process.js';
 import { truncate } from './files.js';
 
-const IGNORE = ['**/.git/**', '**/node_modules/**', '**/dist/**', '**/build/**'];
+const IGNORE = [
+  '**/.git/**',
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.venv/**',
+  '**/__pycache__/**',
+];
+const MAX_FILES = 10_000;
+const run = promisify(execFile);
+
+/** Expand `{a,b}` alternatives, which git pathspecs do not support. */
+export function expandBraces(pattern: string, limit = 64): string[] {
+  const group = /\{([^{}]*)\}/.exec(pattern);
+  if (!group) return [pattern];
+  const expanded = group[1]!
+    .split(',')
+    .flatMap((part) =>
+      expandBraces(
+        pattern.slice(0, group.index) + part + pattern.slice(group.index + group[0].length),
+        limit,
+      ),
+    );
+  if (expanded.length > limit) throw new Error('Glob pattern has too many alternatives.');
+  return [...new Set(expanded)];
+}
+
+/**
+ * Files git would show under `directory` that match `pattern`: tracked and untracked ones, minus
+ * those .gitignore excludes. Undefined outside a work tree or inside an ignored directory, where
+ * the caller walks the file system instead.
+ */
+async function gitFiles(
+  directory: string,
+  pattern: string,
+  signal?: AbortSignal,
+): Promise<string[] | undefined> {
+  const options = { cwd: directory, signal, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 };
+  try {
+    const ignored = await run('git', ['check-ignore', '-q', '.'], options).then(
+      () => true,
+      (error: { code?: unknown }) => (error.code === 1 ? false : undefined),
+    );
+    if (ignored !== false) return undefined;
+    const { stdout } = await run(
+      'git',
+      [
+        'ls-files',
+        '-z',
+        '--cached',
+        '--others',
+        '--exclude-standard',
+        '--',
+        ...expandBraces(pattern).map((alternative) => `:(glob)${alternative}`),
+      ],
+      options,
+    );
+    return [...new Set(stdout.split('\0').filter(Boolean))];
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof Error && error.message.includes('too many alternatives')) throw error;
+    return undefined;
+  }
+}
 
 function validatePattern(pattern: string): void {
   if (path.isAbsolute(pattern) || pattern.split(/[\\/]/).includes('..')) {
@@ -23,6 +89,25 @@ async function collectFiles(
 ): Promise<{ files: string[]; truncated: boolean }> {
   signal?.throwIfAborted();
   validatePattern(pattern);
+  const listed = await gitFiles(directory, pattern, signal);
+  if (listed) {
+    const files: string[] = [];
+    for (const entry of listed) {
+      const target = path.resolve(directory, entry);
+      if (await isProtected(target, policy)) continue;
+      // Like the file-system walk, skip links; git also lists tracked files deleted since.
+      if (
+        !(await lstat(target).then(
+          (info) => info.isFile(),
+          () => false,
+        ))
+      )
+        continue;
+      if (files.length === MAX_FILES) return { files: files.sort(), truncated: true };
+      files.push(path.relative(cwd, target));
+    }
+    return { files: files.sort(), truncated: false };
+  }
   const stream = Readable.from(
     fg.stream(pattern, {
       cwd: directory,
@@ -46,7 +131,7 @@ async function collectFiles(
       if (typeof entry !== 'string') throw new Error('Unexpected search result.');
       const target = path.resolve(directory, entry);
       if (await isProtected(target, policy)) continue;
-      if (files.length === 10_000) {
+      if (files.length === MAX_FILES) {
         truncated = true;
         break;
       }
@@ -58,6 +143,12 @@ async function collectFiles(
     stream.destroy();
   }
   return { files: files.sort(), truncated };
+}
+
+/** Project files for `@` completion: what git shows, or a walk outside git, without protected paths. */
+export async function projectFiles(cwd: string, protectedPaths: string[]): Promise<string[]> {
+  const policy = await createPathPolicy(cwd, protectedPaths);
+  return (await collectFiles(cwd, cwd, '**/*', policy)).files;
 }
 
 export async function globFiles(

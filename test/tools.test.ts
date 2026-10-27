@@ -4,6 +4,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { proposedChange } from '../src/tools/files.js';
+import { expandBraces } from '../src/tools/search.js';
 import { ToolRunner } from '../src/tools/index.js';
 import { formatToolResult } from '../src/ui.js';
 import { createPathPolicy } from '../src/tools/paths.js';
@@ -256,6 +257,27 @@ describe('project file tools', () => {
     const invalid = await runner.run('grep', { pattern: '[' });
     expect(invalid.is_error).toBe(true);
     expect(invalid.content).toContain('Search failed');
+  });
+});
+
+describe('search in a git repository', () => {
+  it('skips what .gitignore excludes unless that directory is searched directly', async () => {
+    await runner.run('bash', {
+      command:
+        'git init -q && mkdir -p src coverage && printf "coverage/\\n" > .gitignore && printf "needle\\n" > src/a.ts && printf "needle\\n" > src/b.md && printf "needle\\n" > coverage/c.ts && git add src/a.ts',
+    });
+    const found = await runner.run('glob', { pattern: '**/*.{ts,md}' });
+    expect(found.content).toBe('src/a.ts\nsrc/b.md');
+    const matches = await runner.run('grep', { pattern: 'needle', literal: true });
+    expect(matches.content).toContain('src/a.ts:1:needle');
+    expect(matches.content).not.toContain('coverage');
+    const direct = await runner.run('grep', { path: 'coverage', pattern: 'needle', literal: true });
+    expect(direct.content).toContain('coverage/c.ts:1:needle');
+    expect(expandBraces('src/**/*.{ts,{md,mdx}}')).toEqual([
+      'src/**/*.ts',
+      'src/**/*.md',
+      'src/**/*.mdx',
+    ]);
   });
 });
 
