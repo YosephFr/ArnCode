@@ -168,7 +168,7 @@ The integrations follow Anthropic's [Messages API](https://platform.claude.com/d
 
 Planned work:
 
-- Permission rules for specific commands and paths, kept across sessions.
+- Saving "allow for this session" answers as lasting permission rules.
 - Background shells in OAuth sessions.
 - Published benchmark runs against other coding agents.
 - Windows process management without WSL.

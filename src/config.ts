@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { loadCredentialCandidates } from './auth.js';
 import { hooksSchema } from './hooks.js';
 import { mcpServersSchema } from './mcp.js';
-import { permissionRulesSchema } from './permission-rules.js';
+import { permissionRulesSchema, protectedFromRules } from './permission-rules.js';
 import { resolveModel } from './models.js';
 import { atomicWriteJson, readJson, withFileLock } from './storage.js';
 import type { Settings } from './types.js';
@@ -163,7 +163,15 @@ export function resolveSettings(
     ...(config.hooks ? { hooks: config.hooks } : {}),
     ...(config.mcpServers ? { mcpServers: config.mcpServers } : {}),
     ...(config.permissions ? { permissions: config.permissions } : {}),
-    protectedPaths: [...new Set([...DEFAULT_PROTECTED_PATHS, ...configuredPaths, ...flagPaths])],
+    // Read deny rules also keep searches and listings away from those files.
+    protectedPaths: [
+      ...new Set([
+        ...DEFAULT_PROTECTED_PATHS,
+        ...configuredPaths,
+        ...flagPaths,
+        ...protectedFromRules(config.permissions),
+      ]),
+    ],
     cwd: resolve(flags.cwd ?? process.cwd()),
     ...(explicitAuth ? { authRestriction: authSchema.parse(explicitAuth) } : {}),
     ...(pinnedCredential ? { pinnedCredential: profileSchema.parse(pinnedCredential) } : {}),

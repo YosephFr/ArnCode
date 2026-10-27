@@ -1,6 +1,5 @@
-import { realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { RuleSet, sessionRule, type PermissionRules } from './permission-rules.js';
+import { RuleSet, realLocation, sessionRule, type PermissionRules } from './permission-rules.js';
 import type { Approval, PermissionMode } from './types.js';
 
 export type PermissionPrompt = (
@@ -52,19 +51,6 @@ export function isReadOnlyTool(name: string): boolean {
   return readOnlyTools.has(name);
 }
 
-/** The real location of a path that may not exist yet, through its nearest existing parent. */
-async function realLocation(file: string): Promise<string> {
-  const rest: string[] = [];
-  for (let current = file; ; current = path.dirname(current)) {
-    try {
-      return path.join(await realpath(current), ...rest);
-    } catch {
-      if (path.dirname(current) === current) return file;
-      rest.unshift(path.basename(current));
-    }
-  }
-}
-
 // Compared by real location, so a plan directory linked elsewhere grants nothing.
 async function isPlanFile(cwd: string, input: Record<string, unknown>): Promise<boolean> {
   const target = input.path ?? input.file_path;
@@ -100,12 +86,13 @@ export class PermissionManager {
   ): Promise<Approval> => {
     if (signal?.aborted) return { allowed: false, reason: 'Operation cancelled.' };
     // Deny rules hold in every mode, full access included.
-    const ruled = this.rules.check(name, input, this.cwd ?? process.cwd());
+    const ruled = await this.rules.check(name, input, this.cwd ?? process.cwd());
     if (ruled?.decision === 'deny')
       return { allowed: false, reason: `Blocked by your permission rule ${ruled.rule}.` };
     if (this.mode === 'full' || readOnlyTools.has(name)) return { allowed: true };
-    // Plan mode stays read-only whatever the rules allow, apart from plan files.
-    if (ruled?.decision === 'allow' && !(this.mode === 'plan' && editTools.has(name)))
+    // Plan mode stays read-only whatever the rules allow: there they can only skip the question
+    // for shell commands, which plan mode asks about instead of refusing.
+    if (ruled?.decision === 'allow' && (this.mode !== 'plan' || shellTools.has(name)))
       return { allowed: true };
     if (this.mode === 'plan') {
       if (editTools.has(name) && this.cwd && (await isPlanFile(this.cwd, input)))

@@ -66,7 +66,8 @@ const ui = new TerminalUI();
 /** What "allow for the rest of this session" covers: a command prefix, or the whole tool. */
 function alwaysScope(name: string, args: Record<string, unknown>, tool: string): string {
   const rule = sessionRule(name, args);
-  return rule.startsWith('Bash(') ? `${rule.slice(5, -3)} commands` : tool;
+  if (!rule.startsWith('Bash(')) return tool;
+  return rule.endsWith(':*)') ? `${rule.slice(5, -3)} commands` : 'this command';
 }
 registerEnvironmentSecrets(process.env);
 // Background commands never outlive ArnCode.

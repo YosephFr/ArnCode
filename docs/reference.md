@@ -274,7 +274,13 @@ Rules in Claude Code's format let specific actions run without a question, or ne
 }
 ```
 
-`deny` blocks a matching action in every mode, full access included. `allow` runs it without asking in `edits` and `ask` modes, and shell commands in `plan` mode, which still writes only plan files. `Bash(prefix:*)` matches commands that start with the prefix and `Bash(command)` matches one command exactly; in a chained command every part must be allowed, and commands that use `$(…)` or backticks always ask. File tools take gitignore-style paths relative to the project, or absolute and `~/` paths; `mcp__server` covers all of a server's tools; `WebFetch` rules apply in OAuth sessions. Rules load from your configuration only. Allowing a shell command for the rest of a session covers its command prefix, such as `npm test`.
+`deny` blocks a matching action in every mode, full access included. `allow` runs it without asking in `edits` and `ask` modes; in `plan` mode it only lets shell commands skip the question, and plan mode still writes only plan files.
+
+`Bash(prefix:*)` matches commands that start with the prefix and `Bash(command)` matches one command exactly. An allow rule must match every command in a chain (`&&`, `||`, `;`, `|`, `&`), and commands that redirect to files, set variables first, or use `$(…)`, backticks or process substitution always ask. A deny rule looks through variable assignments, wrappers such as `sudo`, `env` and `command`, quotes and escapes, grouping, substitutions and `bash -c`. Shell rules guard against mistakes, not against a determined command: a shell can always reach the same effect another way, so keep `ask` mode for untrusted work.
+
+Path rules follow Claude Code: `Edit` rules cover every tool that changes files, and `Read` rules every tool that reads them, so a `Read` deny rule also keeps searches and listings away from those files. A pattern without a slash matches a name at any depth, as in `.gitignore`; `/path` is relative to the project, `//path` is absolute, and `~/path` is in your home directory. Links are followed, so a link inside the project cannot widen an allow rule or slip past a deny rule. `mcp__server` covers all of a server's tools, and `WebFetch(domain:…)` applies in OAuth sessions.
+
+Rules load from your configuration only. Allowing a plain shell command for the rest of a session covers its command prefix, such as `npm test`; a chained or wrapped command is allowed again only exactly as it was. Session approvals end with the session.
 
 ### Protected paths
 

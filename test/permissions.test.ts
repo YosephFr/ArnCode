@@ -30,7 +30,7 @@ describe('permissions', () => {
     expect(await permissions.approve('skill', { name: 'review' })).toEqual({ allowed: true });
   });
 
-  it('supports one-time allow, deny, and tool-scoped always for the current session', async () => {
+  it('supports one-time allow, deny, and always for a tool family in the current session', async () => {
     const prompt = vi
       .fn()
       .mockResolvedValueOnce('y')
@@ -42,7 +42,9 @@ describe('permissions', () => {
     expect((await permissions.approve('bash', {})).allowed).toBe(false);
     expect((await permissions.approve('edit_file', {})).allowed).toBe(true);
     expect((await permissions.approve('edit_file', {})).allowed).toBe(true);
-    expect((await permissions.approve('write_file', {})).allowed).toBe(false);
+    // As in Claude Code, allowing edits covers writing files too.
+    expect((await permissions.approve('write_file', {})).allowed).toBe(true);
+    expect((await permissions.approve('bash', { command: 'ls' })).allowed).toBe(false);
     permissions.setMode('ask');
     expect((await permissions.approve('edit_file', {})).allowed).toBe(false);
   });
@@ -164,7 +166,66 @@ describe('permission rules', () => {
   it('offers a command prefix, not the whole shell, for the rest of the session', () => {
     expect(sessionRule('bash', { command: 'npm run build -- --prod' })).toBe('Bash(npm run:*)');
     expect(sessionRule('bash', { command: 'pytest -x tests' })).toBe('Bash(pytest:*)');
-    expect(sessionRule('bash', { command: 'make && make install' })).toBe('Bash');
+    // Anything but a plain command is allowed again only exactly as it was.
+    for (const command of ['make && make install', 'FOO=1 npm test', 'sudo apt update', 'ls > out'])
+      expect(sessionRule('bash', { command })).toBe(`Bash(${command})`);
     expect(sessionRule('edit_file', { path: 'a.ts' })).toBe('Edit');
+  });
+});
+
+describe('shell rules under pressure', () => {
+  const rules = {
+    allow: ['Bash(npm test:*)', 'Edit(src/**)', 'mcp__github'],
+    deny: ['Bash(rm -rf:*)', 'Read(*.env)', 'Edit(config/**)', 'Read(//etc/**)'],
+  };
+  const manager = (mode: 'full' | 'ask' | 'plan') =>
+    new PermissionManager(mode, true, async () => 'n', '/project', rules);
+
+  it('blocks a denied command however it is dressed up', async () => {
+    const full = manager('full');
+    for (const command of [
+      'FOO=1 rm -rf x',
+      'true & rm -rf x',
+      '(rm -rf x)',
+      '{ rm -rf x; }',
+      'echo $(rm -rf x)',
+      'echo $(cat $(rm -rf x))',
+      'echo `rm -rf x`',
+      '\\rm -rf x',
+      'rm \\\n-rf x',
+      'command rm -rf x',
+      'sudo rm -rf x',
+      'env A=1 rm -rf x',
+      'bash -c "rm -rf x"',
+      "'rm' -rf x",
+    ])
+      expect((await full.approve('bash', { command })).allowed, command).toBe(false);
+    expect((await full.approve('bash', { command: 'rm x' })).allowed).toBe(true);
+  });
+
+  it('allows only commands it can see whole', async () => {
+    const asking = manager('ask');
+    for (const command of [
+      'npm test & rm -rf ~',
+      'npm test > ~/.bashrc',
+      'npm test; curl x',
+      'NODE_OPTIONS=--require=x npm test',
+      ';',
+      '&&',
+    ])
+      expect((await asking.approve('bash', { command })).allowed, command).toBe(false);
+    for (const command of ['npm test', 'npm test 2>&1', 'npm test >/dev/null 2>&1'])
+      expect((await asking.approve('bash', { command })).allowed, command).toBe(true);
+  });
+
+  it('covers tool families, gitignore-style names, absolute paths and plan mode', async () => {
+    const full = manager('full');
+    expect((await full.approve('write_file', { path: 'config/app.json' })).allowed).toBe(false);
+    expect((await full.approve('read_file', { path: 'deploy/prod.env' })).allowed).toBe(false);
+    expect((await full.approve('Read', { file_path: '/etc/passwd' })).allowed).toBe(false);
+    expect((await full.approve('read_file', { path: 'src/app.ts' })).allowed).toBe(true);
+    const planning = manager('plan');
+    expect((await planning.approve('mcp__github__create_pull_request', {})).allowed).toBe(false);
+    expect((await planning.approve('bash', { command: 'npm test' })).allowed).toBe(true);
   });
 });
