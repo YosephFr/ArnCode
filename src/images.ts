@@ -1,5 +1,17 @@
-import { PNG } from 'pngjs';
-import jpeg from 'jpeg-js';
+import { createRequire } from 'node:module';
+import type { PNG as PNGCodec } from 'pngjs';
+import type jpegCodec from 'jpeg-js';
+
+// The codecs load on first use: most sessions never decode an image.
+const require = createRequire(import.meta.url);
+let codecs: { PNG: typeof PNGCodec; jpeg: typeof jpegCodec } | undefined;
+function load() {
+  codecs ??= {
+    PNG: (require('pngjs') as { PNG: typeof PNGCodec }).PNG,
+    jpeg: require('jpeg-js') as typeof jpegCodec,
+  };
+  return codecs;
+}
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 
@@ -200,7 +212,7 @@ export function resizeRGBA(
 
 function decode(data: Buffer, info: ImageInfo): { pixels: Uint8Array; alpha: boolean } {
   if (info.mediaType === 'image/png') {
-    const png = PNG.sync.read(data);
+    const png = load().PNG.sync.read(data);
     let alpha = false;
     for (let index = 3; index < png.data.length; index += 4)
       if (png.data[index]! < 255) {
@@ -209,7 +221,7 @@ function decode(data: Buffer, info: ImageInfo): { pixels: Uint8Array; alpha: boo
       }
     return { pixels: png.data, alpha };
   }
-  const image = jpeg.decode(data, {
+  const image = load().jpeg.decode(data, {
     useTArray: true,
     formatAsRGBA: true,
     maxResolutionInMP: 120,
@@ -219,6 +231,7 @@ function decode(data: Buffer, info: ImageInfo): { pixels: Uint8Array; alpha: boo
 }
 
 function encodePNG(pixels: Uint8Array, width: number, height: number): Buffer {
+  const { PNG } = load();
   const image = new PNG({ width, height });
   image.data = Buffer.from(pixels.buffer, pixels.byteOffset, pixels.length);
   return PNG.sync.write(image, { colorType: 6 });
@@ -228,7 +241,7 @@ function encodePNG(pixels: Uint8Array, width: number, height: number): Buffer {
 function encodeJPEG(pixels: Uint8Array, width: number, height: number): Buffer {
   let encoded = Buffer.alloc(0);
   for (const quality of [85, 75, 60]) {
-    encoded = Buffer.from(jpeg.encode({ data: pixels, width, height }, quality).data);
+    encoded = Buffer.from(load().jpeg.encode({ data: pixels, width, height }, quality).data);
     if (encoded.length <= REENCODED_BYTES) break;
   }
   return encoded;
