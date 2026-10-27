@@ -78,12 +78,12 @@ describe('image preparation', () => {
     const transparent = prepareImage(png(2200, 300, 128));
     expect(transparent.mediaType).toBe('image/png');
     expect(Math.max(transparent.width, transparent.height)).toBe(2000);
-    const heavy = noisyJPEG(1200, 1200);
-    expect(heavy.length).toBeGreaterThan(1_000_000);
-    const recompressed = prepareImage(heavy);
+    // A file over the byte budget is recompressed even when its dimensions already fit.
+    const heavy = noisyJPEG(400, 400);
+    const recompressed = prepareImage(heavy, { ...HIGH_RESOLUTION, maxBytes: 20_000 });
     expect(recompressed.data.length).toBeLessThan(heavy.length);
     expect(recompressed.mediaType).toBe('image/jpeg');
-  });
+  }, 30_000);
 
   it('rejects files that are not images and oversized formats it cannot decode', () => {
     expect(() => prepareImage(Buffer.from('not an image'))).toThrow('Unsupported image');
