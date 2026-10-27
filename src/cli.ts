@@ -70,8 +70,10 @@ function alwaysScope(name: string, args: Record<string, unknown>, tool: string):
   return rule.endsWith(':*)') ? `${rule.slice(5, -3)} commands` : 'this command';
 }
 registerEnvironmentSecrets(process.env);
-// Background commands never outlive ArnCode.
+// Background commands never outlive ArnCode, even when its terminal closes.
 process.on('exit', killAllJobs);
+process.on('SIGHUP', () => process.exit(129));
+
 const program = new Command()
   .name('arncode')
   .description('A coding agent with a multi-account credential bank and automatic failover')

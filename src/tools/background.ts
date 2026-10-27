@@ -64,7 +64,11 @@ export async function startJob(command: string, cwd: string, waitMs = 1000): Pro
   });
   const job: Job = { id, command, child, output: '', read: 0, dropped: 0 };
   jobs.set(id, job);
-  const redactor = new StreamingRedactor();
+  // One redactor per stream: interleaved writes must not split a secret across them.
+  const redactors = new Map([
+    [child.stdout, new StreamingRedactor()],
+    [child.stderr, new StreamingRedactor()],
+  ]);
   const append = (text: string) => {
     job.output += text;
     if (job.output.length > MAX_BUFFER) {
@@ -73,7 +77,7 @@ export async function startJob(command: string, cwd: string, waitMs = 1000): Pro
       job.dropped += cut;
     }
   };
-  for (const stream of [child.stdout, child.stderr]) {
+  for (const [stream, redactor] of redactors) {
     stream?.setEncoding('utf8');
     stream?.on('data', (chunk: string) => append(redactor.write(chunk)));
   }
@@ -84,7 +88,7 @@ export async function startJob(command: string, cwd: string, waitMs = 1000): Pro
       resolve();
     });
     child.on('exit', (code, signal) => {
-      append(redactor.flush());
+      for (const redactor of redactors.values()) append(redactor.flush());
       job.exit = { code, signal };
       resolve();
     });
