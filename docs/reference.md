@@ -53,12 +53,15 @@ Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt
 | `/mode [mode]`    | Show or select `full`, `edits`, `ask`, or `plan`             |
 | `/plan`           | Switch to plan mode                                          |
 | `/fast [on/off]`  | Toggle fast mode, or set `on` / `off`                        |
+| `/theme [name]`   | Choose `auto`, `dark`, `light`, or `plain` colors; saved     |
 | `/effort [level]` | Show or change effort                                        |
 | `/compact`        | Summarize the conversation to free context                   |
 | `/context`        | Show context use and when the conversation is summarized     |
+| `/todos`          | Show the agent's current checklist                           |
 | `/status`         | Show the model, permissions, credential, and plan limits     |
 | `/resume`         | Continue an earlier conversation in this project             |
 | `/init`           | Write or improve `AGENTS.md` for this project                |
+| `/mcp`            | Show MCP servers and their tools                             |
 | `/export [file]`  | Save the conversation as Markdown in the project             |
 | `/clear`          | Start a fresh conversation                                   |
 | `/cost`           | Show session usage and estimated cost                        |
@@ -161,11 +164,12 @@ Settings resolve in this order: command-line flags, environment variables, `~/.a
   "maxTurns": 80,
   "compactAt": 200000,
   "webTools": true,
-  "permissionMode": "full"
+  "permissionMode": "full",
+  "theme": "auto"
 }
 ```
 
-Use `"permissionMode": "ask"` for persistent approval prompts. A configured `auth` value restricts the credential type, and `profile` selects a preferred account. `auth use` clears the auth restriction while setting the preference.
+Use `"permissionMode": "ask"` for persistent approval prompts. The `auto` theme follows the terminal's background; `NO_COLOR` turns colors off whatever the theme. A configured `auth` value restricts the credential type, and `profile` selects a preferred account. `auth use` clears the auth restriction while setting the preference.
 
 | Environment variable               | Purpose                                                                |
 | ---------------------------------- | ---------------------------------------------------------------------- |
@@ -180,6 +184,7 @@ Use `"permissionMode": "ask"` for persistent approval prompts. A configured `aut
 | `ARNCODE_MAX_TOKENS`               | Maximum output tokens per API response                                 |
 | `ARNCODE_MAX_TURNS`                | Maximum turns per task                                                 |
 | `ARNCODE_COMPACT_AT`               | Context size in tokens at which API conversations are summarized       |
+| `ARNCODE_THEME`                    | Terminal colors: `auto`, `dark`, `light`, or `plain`                   |
 | `ARNCODE_API_FEATURES`             | `full` or `basic`; overrides the endpoint-based feature selection      |
 | `ARNCODE_EXPLORE_MODEL`            | Model for read-only `explore` subagents in API-key mode                |
 | `ARNCODE_CONFIG_DIR`               | Alternate directory for state, global instructions, and ArnCode skills |

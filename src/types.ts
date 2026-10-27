@@ -29,6 +29,8 @@ export interface Settings {
   /** Web search and fetch: server tools in API mode, native tools in OAuth mode. */
   webTools: boolean;
   permissionMode: PermissionMode;
+  /** Terminal colors; `auto` follows the terminal's background. */
+  theme?: 'auto' | 'dark' | 'light' | 'plain';
   protectedPaths: string[];
   /** Command hooks from the user's configuration. */
   hooks?: HooksConfig;

@@ -46,6 +46,7 @@ const userConfigSchema = z
     hooks: hooksSchema.optional(),
     mcpServers: mcpServersSchema.optional(),
     permissionMode: z.enum(['full', 'edits', 'ask', 'plan']).optional(),
+    theme: z.enum(['auto', 'dark', 'light', 'plain']).optional(),
     protectedPaths: z
       .array(
         z
@@ -147,6 +148,7 @@ export function resolveSettings(
       config.compactAt ??
       DEFAULTS.compactAt,
     permissionMode: flags.permissionMode ?? config.permissionMode ?? DEFAULTS.permissionMode,
+    theme: flags.theme ?? (env.ARNCODE_THEME || undefined) ?? config.theme,
   });
   return {
     ...DEFAULTS,

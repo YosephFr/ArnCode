@@ -158,7 +158,7 @@ export class TerminalUI implements AgentUI {
   private hasText = false;
   private endsWithNewline = true;
   private progressOpen = false;
-  private readonly colors;
+  private colors: ReturnType<typeof pc.createColors>;
   private app?: InteractiveApp;
   private theme: Theme;
   private line = '';
@@ -170,16 +170,21 @@ export class TerminalUI implements AgentUI {
     private readonly out: TerminalOutput = process.stdout,
     private readonly err: TerminalOutput = process.stderr,
   ) {
-    this.colors = pc.createColors(
-      Boolean(err.isTTY) && !process.env.NO_COLOR && process.env.TERM !== 'dumb',
-    );
     this.theme = themeFor(err);
+    this.colors = pc.createColors(this.theme.color);
   }
 
   attach(app: InteractiveApp, theme: Theme): void {
     this.app = app;
+    this.setTheme(theme);
+  }
+
+  /** Use another theme from the next line on. */
+  setTheme(theme: Theme): void {
+    if (this.markdown) this.endText();
     this.theme = theme;
-    this.markdown = new MarkdownStream(themeStyle(theme), () => this.width);
+    this.colors = pc.createColors(theme.color);
+    if (this.app) this.markdown = new MarkdownStream(themeStyle(theme), () => this.width);
   }
 
   detach(): void {

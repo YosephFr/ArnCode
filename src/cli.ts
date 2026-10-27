@@ -196,7 +196,8 @@ program.action(async (options: CliOptions) => {
   const resumed = Boolean(session);
   session ??= newSession(settings);
 
-  const theme = themeFor(process.stderr);
+  let theme = themeFor(process.stderr, settings.theme);
+  ui.setTheme(theme);
   // Assigned once the session is ready; earlier callbacks see undefined and fall back.
   let app: InteractiveApp | undefined = undefined;
   let previousMode: PermissionMode =
@@ -258,7 +259,13 @@ program.action(async (options: CliOptions) => {
     return { approved: true, mode: choice };
   };
   let plan: PlanUsage = {};
-  const state: ReplState = { settings, session, permissions, ui, setMode };
+  const setTheme = (preference: NonNullable<typeof settings.theme>) => {
+    theme = themeFor(process.stderr, preference);
+    app?.setTheme(theme);
+    ui.setTheme(theme);
+    return theme;
+  };
+  const state: ReplState = { settings, session, permissions, ui, setMode, setTheme };
   let active: AbortController | undefined;
   let closing = false;
   const interrupt = () => {

@@ -16,6 +16,7 @@ import { newSession, type Session } from './session.js';
 import { MODE_LABELS, contextBudget, type PlanUsage } from './status.js';
 import { compactNumber, duration } from './tui/text.js';
 import type { Choice } from './tui/select.js';
+import type { Theme } from './tui/theme.js';
 import type { TerminalUI } from './ui.js';
 import type { PermissionManager } from './permissions.js';
 import type { Settings } from './types.js';
@@ -35,6 +36,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: '/plan', description: 'Plan before changing anything' },
   { name: '/compact', description: 'Summarize the conversation to free context' },
   { name: '/context', description: 'Show context use' },
+  { name: '/todos', description: 'Show the current checklist' },
   { name: '/status', description: 'Show the session, model, and plan limits' },
   { name: '/resume', description: 'Continue an earlier conversation in this project' },
   { name: '/clear', description: 'Start a new conversation' },
@@ -42,6 +44,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: '/mcp', description: 'Show MCP servers and their tools' },
   { name: '/export', usage: '[file]', description: 'Save the conversation as Markdown' },
   { name: '/fast', usage: '[on|off]', description: 'Toggle fast mode' },
+  { name: '/theme', usage: '[name]', description: 'auto, dark, light, or plain' },
   { name: '/auth', usage: '[type|auto]', description: 'Choose api-key, oauth, or the mixed bank' },
   { name: '/cost', description: 'Show session usage' },
   { name: '/creds', description: 'Manage credentials' },
@@ -86,6 +89,8 @@ export interface ReplState {
   ui: TerminalUI;
   /** Apply a permission mode everywhere it is tracked. */
   setMode?: (mode: Settings['permissionMode']) => void;
+  /** Restyle the terminal; returns the theme in effect, which is plain without color support. */
+  setTheme?: (preference: NonNullable<Settings['theme']>) => Theme;
   custom?: readonly CustomCommand[];
   plan?: () => PlanUsage;
   compact?: () => Promise<void>;
@@ -233,6 +238,40 @@ export async function slashCommand(line: string, state: ReplState): Promise<Slas
       await persist({ fast: value ? value === 'on' : !settings.fast });
       ui.notice(`Fast mode: ${settings.fast ? 'on' : 'off'}`);
       break;
+    case '/theme': {
+      const names = ['auto', 'dark', 'light', 'plain'] as const;
+      let theme = value ? names.find((name) => name === value) : undefined;
+      if (value && !theme) throw new Error('Use /theme auto, dark, light, or plain.');
+      if (!theme && state.select)
+        theme = await state.select(
+          'Choose a theme',
+          [
+            { label: 'Match the terminal', value: 'auto' as const },
+            { label: 'Dark', value: 'dark' as const },
+            { label: 'Light', value: 'light' as const },
+            { label: 'No colors', value: 'plain' as const },
+          ],
+          names.indexOf(settings.theme ?? 'auto'),
+        );
+      if (theme) await persist({ theme });
+      const preference = settings.theme ?? 'auto';
+      const applied = state.setTheme?.(preference);
+      const detail = !applied
+        ? ''
+        : !applied.color && preference !== 'plain'
+          ? ' · colors are off in this terminal'
+          : preference === 'auto'
+            ? ` (${applied.name})`
+            : '';
+      ui.notice(`Theme: ${preference}${detail}`);
+      break;
+    }
+    case '/todos': {
+      const items = state.session.todos ?? [];
+      if (items.length) ui.todos(items);
+      else ui.notice('No checklist in this conversation yet.');
+      break;
+    }
     case '/effort':
       if (value) {
         if (!['low', 'medium', 'high', 'xhigh', 'max'].includes(value))

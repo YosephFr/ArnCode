@@ -65,6 +65,12 @@ export class InteractiveApp {
     this.render();
   }
 
+  /** Restyle the footer; scrollback keeps the colors it was printed with. */
+  setTheme(theme: Theme): void {
+    this.options.theme = theme;
+    this.render();
+  }
+
   stop(): void {
     if (!this.started) return;
     this.started = false;

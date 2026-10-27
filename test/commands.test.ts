@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { expandCommand, loadCustomCommands, splitArguments } from '../src/commands/custom.js';
-import { DEFAULTS } from '../src/config.js';
+import { DEFAULTS, readConfig } from '../src/config.js';
 import { PermissionManager } from '../src/permissions.js';
 import { SLASH_COMMANDS, slashCommand, type ReplState } from '../src/repl.js';
 import { appendTranscript, newSession } from '../src/session.js';
+import { createTheme } from '../src/tui/theme.js';
 import type { TerminalUI } from '../src/ui.js';
 
 let root: string;
@@ -105,5 +106,22 @@ describe('session commands', () => {
     expect(notices.at(-1)).toContain('Context: 50k of 200k tokens (25%)');
     await slashCommand('/model sonnet', { ...value, settings: { ...value.settings } });
     expect(notices.at(-1)).toContain('Sonnet 5.5 (claude-sonnet-5-5)');
+  });
+
+  it('switches the theme at once and keeps it for later sessions', async () => {
+    const applied: string[] = [];
+    const { value, notices } = state({
+      setTheme: (name) => {
+        applied.push(name);
+        return createTheme(name === 'auto' ? 'dark' : name);
+      },
+    });
+    await slashCommand('/theme light', value);
+    expect(applied).toEqual(['light']);
+    expect(notices.at(-1)).toBe('Theme: light');
+    expect((await readConfig(path.join(root, 'state'))).theme).toBe('light');
+    await expect(slashCommand('/theme neon', value)).rejects.toThrow('/theme auto');
+    await slashCommand('/todos', value);
+    expect(notices.at(-1)).toBe('No checklist in this conversation yet.');
   });
 });

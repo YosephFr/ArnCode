@@ -117,9 +117,12 @@ export function themeStyle(theme: Theme): MarkdownStyle {
   const colors = pc.createColors(true);
   return {
     ...colorStyle(colors),
+    code: theme.accent,
     muted: theme.muted,
     strong: theme.strong,
     heading: theme.strong,
+    // Bright and yellow text washes out on light backgrounds.
+    ...(theme.name === 'light' ? { keyword: colors.magenta, number: colors.blue } : {}),
     codeLine: (line, width) =>
       theme.surface(line + ' '.repeat(Math.max(0, width - stringWidth(line)))),
   };
