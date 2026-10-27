@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { loadCredentialCandidates } from './auth.js';
 import { hooksSchema } from './hooks.js';
 import { mcpServersSchema } from './mcp.js';
+import { permissionRulesSchema } from './permission-rules.js';
 import { resolveModel } from './models.js';
 import { atomicWriteJson, readJson, withFileLock } from './storage.js';
 import type { Settings } from './types.js';
@@ -47,6 +48,7 @@ const userConfigSchema = z
     oauthSessions: z.boolean().optional(),
     hooks: hooksSchema.optional(),
     mcpServers: mcpServersSchema.optional(),
+    permissions: permissionRulesSchema.optional(),
     permissionMode: z.enum(['full', 'edits', 'ask', 'plan']).optional(),
     theme: z.enum(['auto', 'dark', 'light', 'plain']).optional(),
     protectedPaths: z
@@ -160,6 +162,7 @@ export function resolveSettings(
     ...settings,
     ...(config.hooks ? { hooks: config.hooks } : {}),
     ...(config.mcpServers ? { mcpServers: config.mcpServers } : {}),
+    ...(config.permissions ? { permissions: config.permissions } : {}),
     protectedPaths: [...new Set([...DEFAULT_PROTECTED_PATHS, ...configuredPaths, ...flagPaths])],
     cwd: resolve(flags.cwd ?? process.cwd()),
     ...(explicitAuth ? { authRestriction: authSchema.parse(explicitAuth) } : {}),

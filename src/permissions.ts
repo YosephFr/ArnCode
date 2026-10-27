@@ -1,5 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { RuleSet, sessionRule, type PermissionRules } from './permission-rules.js';
 import type { Approval, PermissionMode } from './types.js';
 
 export type PermissionPrompt = (
@@ -74,18 +75,22 @@ async function isPlanFile(cwd: string, input: Record<string, unknown>): Promise<
 }
 
 export class PermissionManager {
-  private readonly always = new Set<string>();
+  private readonly rules: RuleSet;
 
   constructor(
     public mode: PermissionMode,
     private readonly interactive: boolean,
     private readonly prompt: PermissionPrompt,
     private readonly cwd?: string,
-  ) {}
+    private readonly configured: PermissionRules = {},
+  ) {
+    this.rules = new RuleSet(configured);
+  }
 
+  /** A new mode starts without the approvals given for this session. */
   setMode(mode: PermissionMode): void {
     this.mode = mode;
-    this.always.clear();
+    this.rules.clearSession(this.configured);
   }
 
   approve = async (
@@ -94,7 +99,14 @@ export class PermissionManager {
     signal?: AbortSignal,
   ): Promise<Approval> => {
     if (signal?.aborted) return { allowed: false, reason: 'Operation cancelled.' };
+    // Deny rules hold in every mode, full access included.
+    const ruled = this.rules.check(name, input, this.cwd ?? process.cwd());
+    if (ruled?.decision === 'deny')
+      return { allowed: false, reason: `Blocked by your permission rule ${ruled.rule}.` };
     if (this.mode === 'full' || readOnlyTools.has(name)) return { allowed: true };
+    // Plan mode stays read-only whatever the rules allow, apart from plan files.
+    if (ruled?.decision === 'allow' && !(this.mode === 'plan' && editTools.has(name)))
+      return { allowed: true };
     if (this.mode === 'plan') {
       if (editTools.has(name) && this.cwd && (await isPlanFile(this.cwd, input)))
         return { allowed: true };
@@ -106,7 +118,6 @@ export class PermissionManager {
     } else if (this.mode === 'edits' && editTools.has(name)) {
       return { allowed: true };
     }
-    if (this.mode !== 'plan' && this.always.has(name)) return { allowed: true };
     if (!this.interactive) {
       return {
         allowed: false,
@@ -116,7 +127,7 @@ export class PermissionManager {
     const answer = (await this.prompt(name, input, signal)).trim().toLowerCase();
     if (signal?.aborted) return { allowed: false, reason: 'Operation cancelled.' };
     if (answer === 'always' || answer === 'a') {
-      this.always.add(name);
+      this.rules.add(sessionRule(name, input));
       return { allowed: true };
     }
     if (answer === 'y' || answer === 'yes') return { allowed: true };

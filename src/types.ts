@@ -1,3 +1,4 @@
+import type { PermissionRules } from './permission-rules.js';
 import type { HooksConfig } from './hooks.js';
 import type { McpServers } from './mcp.js';
 export type AuthMode = 'api-key' | 'oauth';
@@ -38,6 +39,8 @@ export interface Settings {
   hooks?: HooksConfig;
   /** MCP servers from the user's configuration. */
   mcpServers?: McpServers;
+  /** Allow and deny rules from the user's configuration. */
+  permissions?: PermissionRules;
 }
 
 export interface TodoItem {

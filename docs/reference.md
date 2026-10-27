@@ -259,6 +259,21 @@ Hooks run your shell commands at points in a session, in the format Claude Code 
 
 Each hook receives JSON on stdin with `session_id`, `cwd`, `hook_event_name`, and, for tool events, `tool_name` and `tool_input` (`tool_response` after the call); `SessionStart` gets `source`, `startup` or `resume`. Matchers are regular expressions over tool names as Claude Code names them: `Read`, `Write`, `Edit`, `Bash`, `BashOutput`, `KillShell`, `Glob`, `Grep`, `Task`, and `TodoWrite`, plus `WebSearch` and `WebFetch` in OAuth sessions. In API-key sessions web search and fetch run on Anthropic's servers, where hooks cannot see them, and OAuth's `TodoWrite` runs only `PostToolUse` hooks. A hook can also print `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}` or `additionalContext`. Hooks time out after 60 seconds unless `timeout` (seconds) says otherwise. They load from your configuration only; hooks defined inside a project are not run, so opening a repository never executes its commands.
 
+### Permission rules
+
+Rules in Claude Code's format let specific actions run without a question, or never run. Add them to `~/.arncode/config.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(npm test:*)", "Bash(git status)", "Edit(src/**)", "mcp__docs"],
+    "deny": ["Bash(rm -rf:*)", "Read(secrets/**)", "WebFetch(domain:example.com)"]
+  }
+}
+```
+
+`deny` blocks a matching action in every mode, full access included. `allow` runs it without asking in `edits` and `ask` modes, and shell commands in `plan` mode, which still writes only plan files. `Bash(prefix:*)` matches commands that start with the prefix and `Bash(command)` matches one command exactly; in a chained command every part must be allowed, and commands that use `$(…)` or backticks always ask. File tools take gitignore-style paths relative to the project, or absolute and `~/` paths; `mcp__server` covers all of a server's tools; `WebFetch` rules apply in OAuth sessions. Rules load from your configuration only. Allowing a shell command for the rest of a session covers its command prefix, such as `npm test`.
+
 ### Protected paths
 
 `protectedPaths` adds exclusions for file reads, writes, edits, directory listings, and searches in both auth modes:

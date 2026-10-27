@@ -10,6 +10,7 @@ import { loadHistory, saveHistory } from './history.js';
 import { findExecutable, runSetupToken } from './onboarding.js';
 import { TerminalInput, readStdin } from './input.js';
 import { PERMISSION_MODES, PermissionManager } from './permissions.js';
+import { sessionRule } from './permission-rules.js';
 import { registerEnvironmentSecrets, redact } from './redact.js';
 import { newSession, latestSession, listSessions, loadSession, saveSession } from './session.js';
 import { compactSession, errorText, runTask } from './runner.js';
@@ -60,6 +61,12 @@ interface CliOptions {
 }
 
 const ui = new TerminalUI();
+
+/** What "allow for the rest of this session" covers: a command prefix, or the whole tool. */
+function alwaysScope(name: string, args: Record<string, unknown>, tool: string): string {
+  const rule = sessionRule(name, args);
+  return rule.startsWith('Bash(') ? `${rule.slice(5, -3)} commands` : tool;
+}
 registerEnvironmentSecrets(process.env);
 // Background commands never outlive ArnCode.
 process.on('exit', killAllJobs);
@@ -274,7 +281,7 @@ program.action(async (options: CliOptions) => {
           [
             { label: 'Yes', value: 'y', key: 'y' },
             {
-              label: `Yes, and allow ${tool} for the rest of this session`,
+              label: `Yes, and allow ${alwaysScope(name, args, tool)} for the rest of this session`,
               value: 'always',
               key: 'a',
             },
@@ -292,6 +299,7 @@ program.action(async (options: CliOptions) => {
       );
     },
     settings.cwd,
+    settings.permissions,
   );
   const setMode = (next: PermissionMode) => {
     settings.permissionMode = next;

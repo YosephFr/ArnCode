@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { sessionRule } from '../src/permission-rules.js';
 import { PermissionManager } from '../src/permissions.js';
 
 describe('permissions', () => {
@@ -83,7 +84,9 @@ describe('edit and plan modes', () => {
       (await permissions.approve('write_file', { path: '.arncode/plans/../../escape.md' })).allowed,
     ).toBe(false);
     expect((await permissions.approve('bash', { command: 'ls' })).allowed).toBe(true);
-    expect((await permissions.approve('bash', { command: 'ls' })).allowed).toBe(true);
+    expect((await permissions.approve('bash', { command: 'ls -la' })).allowed).toBe(true);
+    // "Always" covered ls commands for the session; a different command asks again.
+    expect((await permissions.approve('bash', { command: 'rm x' })).allowed).toBe(true);
     expect(prompt).toHaveBeenCalledTimes(2);
     const headless = new PermissionManager('plan', false, prompt, '/project');
     expect(await headless.approve('bash', { command: 'ls' })).toMatchObject({
@@ -109,5 +112,59 @@ describe('edit and plan modes', () => {
     } finally {
       await rm(project, { recursive: true, force: true });
     }
+  });
+});
+
+describe('permission rules', () => {
+  const ask = () => vi.fn(async () => 'n');
+
+  it('denies in every mode and allows matching calls without asking', async () => {
+    const rules = {
+      allow: ['Bash(npm test:*)', 'Bash(git status)', 'Edit(src/**)', 'mcp__docs'],
+      deny: ['Bash(rm -rf:*)', 'Read(secrets/**)', 'WebFetch(domain:evil.example)'],
+    };
+    const prompt = ask();
+    const full = new PermissionManager('full', true, prompt, '/project', rules);
+    expect(await full.approve('bash', { command: 'ls && rm -rf build' })).toMatchObject({
+      allowed: false,
+      reason: 'Blocked by your permission rule Bash(rm -rf:*).',
+    });
+    expect((await full.approve('read_file', { path: 'secrets/key.txt' })).allowed).toBe(false);
+    expect((await full.approve('Read', { file_path: '/project/secrets/a' })).allowed).toBe(false);
+    expect((await full.approve('WebFetch', { url: 'https://api.evil.example/x' })).allowed).toBe(
+      false,
+    );
+    const asking = new PermissionManager('ask', true, prompt, '/project', rules);
+    for (const command of [
+      'npm test',
+      'npm test -- --watch',
+      'git status',
+      'npm test && git status',
+    ])
+      expect((await asking.approve('bash', { command })).allowed).toBe(true);
+    expect((await asking.approve('edit_file', { path: 'src/app.ts' })).allowed).toBe(true);
+    expect((await asking.approve('mcp__docs__search', {})).allowed).toBe(true);
+    expect(prompt).not.toHaveBeenCalled();
+    // Every chained part must be allowed, and hidden commands never are.
+    for (const command of [
+      'npm test && curl x',
+      'npm test $(curl x)',
+      'npm testing',
+      'git status -s',
+    ])
+      expect((await asking.approve('bash', { command })).allowed).toBe(false);
+    expect((await asking.approve('edit_file', { path: 'README.md' })).allowed).toBe(false);
+    expect(prompt).toHaveBeenCalledTimes(5);
+    // Plan mode stays read-only even where a rule allows edits.
+    const planning = new PermissionManager('plan', true, prompt, '/project', rules);
+    expect((await planning.approve('edit_file', { path: 'src/app.ts' })).allowed).toBe(false);
+    expect((await planning.approve('bash', { command: 'npm test' })).allowed).toBe(true);
+  });
+
+  it('offers a command prefix, not the whole shell, for the rest of the session', () => {
+    expect(sessionRule('bash', { command: 'npm run build -- --prod' })).toBe('Bash(npm run:*)');
+    expect(sessionRule('bash', { command: 'pytest -x tests' })).toBe('Bash(pytest:*)');
+    expect(sessionRule('bash', { command: 'make && make install' })).toBe('Bash');
+    expect(sessionRule('edit_file', { path: 'a.ts' })).toBe('Edit');
   });
 });

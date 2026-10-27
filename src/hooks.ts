@@ -57,6 +57,11 @@ const HOOK_NAMES: Record<string, string> = {
   Agent: 'Task',
 };
 
+/** A tool's name as Claude Code knows it, for hook matchers and permission rules. */
+export function claudeToolName(name: string): string {
+  return HOOK_NAMES[name] ?? name;
+}
+
 /** Tool input in Claude Code's field names: `file_path` for the file tools. */
 function hookInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
   if (['read_file', 'write_file', 'edit_file'].includes(name) && typeof input.path === 'string') {
@@ -98,7 +103,7 @@ export class Hooks {
     payload: Record<string, unknown>,
     options: { tool?: string; signal?: AbortSignal } = {},
   ): Promise<HookOutcome> {
-    const tool = options.tool ? (HOOK_NAMES[options.tool] ?? options.tool) : undefined;
+    const tool = options.tool ? claudeToolName(options.tool) : undefined;
     const commands = (this.config?.[event] ?? [])
       .filter((entry) => tool === undefined || matches(entry.matcher, tool))
       .flatMap((entry) => entry.hooks);

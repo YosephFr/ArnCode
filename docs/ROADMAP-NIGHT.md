@@ -87,8 +87,8 @@ An audit of the night's work found twelve defects, all fixed with regression tes
 | 7.3 | Reads of up to 2,000 lines; search and `@` completion respect `.gitignore`                 | done   |
 | 7.4 | Environment block in API-key prompts; `CLAUDE.local.md` and `~/.claude/CLAUDE.md` fallback | done   |
 | 7.5 | Approval previews for edits; plans rendered as Markdown                                    | done   |
-| 7.6 | Permission rules for commands and paths, kept across sessions                              | todo   |
-| 7.7 | First run: offer `claude setup-token` when Claude Code is installed                        | todo   |
+| 7.6 | Permission rules for commands and paths, kept across sessions                              | done   |
+| 7.7 | First run: offer `claude setup-token` when Claude Code is installed                        | done   |
 | 7.8 | Project `.mcp.json` after a one-time trust prompt                                          | todo   |
 | 7.9 | Larger benchmark tasks; a published comparison run                                         | todo   |
 

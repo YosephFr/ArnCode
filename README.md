@@ -90,6 +90,8 @@ The default `full` mode runs tools without prompts. Three other modes ask first:
 - `ask` (`--safe`, `--ask`) asks before every write, edit, and shell command, showing the change an edit would make.
 - `plan` (`--plan`) keeps the project read-only while the agent explores and proposes a plan; shell commands need approval. When you approve the plan, you choose the mode it continues in.
 
+[Permission rules](docs/reference.md#permission-rules) in Claude Code's format allow or block specific commands, paths, and MCP servers in every mode.
+
 Press Shift+Tab to cycle modes, or use `--permission-mode <mode>` and `/mode <mode>`. Approvals offer once, for the rest of the session, or no. Without a terminal, actions requiring approval are denied immediately.
 
 `--yolo` and `--dangerously-skip-permissions` remain accepted aliases for full mode. Set `"permissionMode"` in configuration to make another mode your preference.
