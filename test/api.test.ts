@@ -133,7 +133,8 @@ describe('API request shape', () => {
   it('requests a summary without fallbacks and within a bounded output', () => {
     const { settings, session } = setup();
     const request = apiRequest(settings, session, 'full', { compaction: true });
-    expect(request.compaction).toEqual({ type: 'summarize' });
+    expect(request.compaction).toMatchObject({ type: 'summarize' });
+    expect(request.compaction?.instructions).toContain('## Next move');
     expect(request.max_tokens).toBe(32000);
     expect(request.betas).toContain('compact-2026-09-04');
     expect(request).not.toHaveProperty('fallbacks');

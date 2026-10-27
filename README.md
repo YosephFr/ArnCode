@@ -76,7 +76,7 @@ arncode -p < task.txt
 arncode --model claude-haiku-5-5 --effort low -p "List the entry points"
 ```
 
-Assistant text goes to stdout; progress, tools, diffs, and usage go to stderr. Piped input works without a TTY. In interactive sessions, a status bar shows the model, effort, mode, context use, plan usage, credential, and cost. You can type the next request while the agent works; Esc interrupts it. `/help`, `/model`, `/effort`, `/mode`, `/plan`, `/fast`, `/auth`, `/clear`, `/cost`, `/creds`, `/usage`, and `/exit` control the session; Tab completes commands and `@` file mentions.
+Assistant text goes to stdout; progress, tools, diffs, and usage go to stderr. Piped input works without a TTY. In interactive sessions, a status bar shows the model, effort, mode, context use, plan usage, credential, and cost. You can type the next request while the agent works; Esc interrupts it. `/help`, `/model`, `/effort`, `/mode`, `/plan`, `/fast`, `/auth`, `/clear`, `/cost`, `/creds`, `/usage`, and `/exit` control the session; Tab completes commands and `@` file mentions. Replies render as Markdown with highlighted code, and Markdown files in `.arncode/commands/` or `.claude/commands/` become your own slash commands.
 
 The agent keeps a checklist for multi-step work, hands broad searches to subagents that run in parallel (read-only explorers use Claude Haiku 5.5 by default), and can search and fetch the web. Both modes can look at images. Reading a PNG, JPEG, GIF, or WebP file (a screenshot or a rendered frame) shows it to the model, and `@path` mentions or pasted image paths in a prompt attach the file directly. Large images are downscaled before they are sent.
 

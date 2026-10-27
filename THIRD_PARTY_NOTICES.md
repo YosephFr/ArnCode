@@ -4,7 +4,7 @@ ArnCode includes code adapted from the following projects.
 
 ## OpenCode
 
-`src/tools/match.ts` adapts the edit matching from OpenCode (https://github.com/anomalyco/opencode, `packages/core/src/tool/plugin/edit.ts`, commit 6b1bc48).
+`src/tools/match.ts` adapts the edit matching from OpenCode (https://github.com/anomalyco/opencode, `packages/core/src/tool/plugin/edit.ts`, commit 6b1bc48), and `src/summary.ts` adapts its conversation summary template (`packages/core/src/session/compaction.ts`).
 
 ```text
 MIT License

@@ -2,8 +2,8 @@ import { loadCredentialCandidates, type Credential } from './auth.js';
 import { MeterStore, isAvailable, credentialState } from './metering.js';
 import { classifyCredentialFailure } from './failures.js';
 import { formatApiError } from './backoff.js';
-import { runAPI } from './engines/api.js';
-import { runOAuth } from './engines/oauth.js';
+import { compactConversation, runAPI } from './engines/api.js';
+import { compactOAuth, runOAuth } from './engines/oauth.js';
 import type { EngineContext } from './engines/types.js';
 import {
   appendTranscript,
@@ -126,6 +126,63 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
   throw new Error(
     `${settings.pinnedCredential ? 'The pinned credential is unavailable.' : 'No healthy credentials remain.'} ${lastFailure ?? ''} Your session is saved; use --continue after a reset or add a credential.`,
   );
+}
+
+/**
+ * Summarize the conversation with the first available credential, preferring the engine that
+ * holds the conversation. Returns false when there was nothing to summarize.
+ */
+export async function compactSession(options: Omit<RunOptions, 'prompt'>): Promise<boolean> {
+  const { settings, session, ui, signal } = options;
+  const meter = options.meter ?? new MeterStore();
+  const save = options.save ?? saveSession;
+  const candidates = (options.candidates ?? (await loadCredentialCandidates(settings)))
+    .filter(
+      (credential) =>
+        credential.enabled &&
+        (!settings.pinnedCredential || credential.name === settings.pinnedCredential) &&
+        (!settings.authRestriction || credential.type === settings.authRestriction),
+    )
+    .sort((a, b) => Number(b.type === session.engine) - Number(a.type === session.engine));
+  if (!session.messages.length && !session.transcript.length) return false;
+  for (const credential of candidates) {
+    signal.throwIfAborted();
+    if (!isAvailable(credentialState(await meter.read(), credential))) continue;
+    switchEngine(session, credential.type);
+    session.credential = credential.name;
+    const ctx: EngineContext = {
+      settings: { ...settings, auth: credential.type },
+      session,
+      credential,
+      ui,
+      approve: async () => ({ allowed: false, reason: 'Tools are off while summarizing.' }),
+      signal,
+      budget: { remaining: 3 },
+      canFailover: candidates.length > 1,
+      checkpoint: () => save(session),
+      onRequest: (count) => meter.request(credential, count),
+      onRetryError: (error) => meter.retry(credential, error),
+      onUsage: async (usage) => {
+        session.usage = addUsage(session.usage, usage);
+        await meter.usage(credential, usage);
+        await save(session);
+      },
+    };
+    try {
+      const done =
+        credential.type === 'api-key' ? await compactConversation(ctx) : await compactOAuth(ctx);
+      await save(session);
+      return done;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      await meter.failure(credential, error);
+      if (!classifyCredentialFailure(error)) throw error;
+    } finally {
+      ui.idle();
+      ui.endText();
+    }
+  }
+  throw new Error('No credential is available to summarize the conversation right now.');
 }
 
 export function errorText(error: unknown): string {

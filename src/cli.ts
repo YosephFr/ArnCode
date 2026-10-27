@@ -10,12 +10,14 @@ import { loadHistory, saveHistory } from './history.js';
 import { TerminalInput, readStdin } from './input.js';
 import { PERMISSION_MODES, PermissionManager } from './permissions.js';
 import { registerEnvironmentSecrets, redact } from './redact.js';
-import { newSession, latestSession, loadSession, saveSession } from './session.js';
-import { errorText, runTask } from './runner.js';
-import { SLASH_COMMANDS, slashCommand } from './repl.js';
+import { newSession, latestSession, listSessions, loadSession, saveSession } from './session.js';
+import { compactSession, errorText, runTask } from './runner.js';
+import { SLASH_COMMANDS, slashCommand, type ReplState } from './repl.js';
+import { loadCustomCommands } from './commands/custom.js';
 import { MODE_LABELS, planUsageFrom, statusLine, type PlanUsage } from './status.js';
 import { InteractiveApp, type Suggestion } from './tui/app.js';
 import { themeFor } from './tui/theme.js';
+import { duration } from './tui/text.js';
 import { TerminalUI, displayName, toolSummary } from './ui.js';
 import { formatUsage } from './usage.js';
 import { usageDifference } from './engines/oauth.js';
@@ -40,7 +42,7 @@ interface CliOptions {
   yolo?: boolean;
   safe?: boolean;
   ask?: boolean;
-  resume?: string;
+  resume?: string | boolean;
   continue?: boolean;
   outputFormat?: OutputFormat;
 }
@@ -97,7 +99,7 @@ const program = new Command()
       'stream-json',
     ]),
   )
-  .option('-r, --resume <id>', 'Resume a saved session')
+  .option('-r, --resume [id]', 'Resume a saved session; choose one when the ID is omitted')
   .option('-c, --continue', 'Resume the latest session in this project')
   .showHelpAfterError()
   .configureOutput({
@@ -175,11 +177,14 @@ program.action(async (options: CliOptions) => {
       input.close();
     }
   }
-  let session = options.resume
-    ? await loadSession(options.resume)
-    : options.continue
-      ? await latestSession(settings.cwd)
-      : undefined;
+  if (options.resume === true && oneShot)
+    throw new Error('Choose a session with --resume <id>, or use --continue.');
+  let session =
+    typeof options.resume === 'string'
+      ? await loadSession(options.resume)
+      : options.continue
+        ? await latestSession(settings.cwd)
+        : undefined;
   if (options.continue && !session)
     throw new Error('No previous session in this project. Start with arncode.');
   if (session && session.cwd !== settings.cwd)
@@ -249,7 +254,7 @@ program.action(async (options: CliOptions) => {
     return { approved: true, mode: choice };
   };
   let plan: PlanUsage = {};
-  const state = { settings, session, permissions, ui, setMode };
+  const state: ReplState = { settings, session, permissions, ui, setMode };
   let active: AbortController | undefined;
   let closing = false;
   const interrupt = () => {
@@ -394,13 +399,13 @@ program.action(async (options: CliOptions) => {
   const suggest = (text: string, cursor: number) => {
     const before = text.slice(0, cursor);
     if (before.startsWith('/') && !before.includes(' ')) {
-      const items: Suggestion[] = SLASH_COMMANDS.filter((command) =>
-        command.name.startsWith(before),
-      ).map((command) => ({
-        value: `${command.name} `,
-        label: command.name,
-        hint: command.description,
-      }));
+      const items: Suggestion[] = [...SLASH_COMMANDS, ...custom]
+        .filter((command) => command.name.startsWith(before))
+        .map((command) => ({
+          value: `${command.name} `,
+          label: command.name,
+          hint: command.description,
+        }));
       return { start: 0, items };
     }
     const mention = /(?:^|\s)@([^\s]*)$/.exec(before);
@@ -418,6 +423,67 @@ program.action(async (options: CliOptions) => {
     return { start: cursor - mention[1]!.length - 1, items };
   };
 
+  const custom = await loadCustomCommands(
+    settings.cwd,
+    SLASH_COMMANDS.map((command) => command.name),
+  ).catch(() => []);
+  const replay = () => {
+    for (const entry of state.session.transcript.filter((item) => item.role !== 'tool').slice(-2)) {
+      const lines = entry.text.split('\n').slice(0, 3).join('\n');
+      if (entry.role === 'user') ui.user(lines);
+      else app?.print(`${theme.muted(redact(lines))}\n`);
+    }
+  };
+  Object.assign(state, {
+    custom,
+    plan: () => plan,
+    select: <T>(question: string, choices: { label: string; value: T }[], initial = 0) =>
+      app!.select(question, choices, initial),
+    compact: async () => {
+      active = new AbortController();
+      const before = state.session.contextTokens;
+      try {
+        const done = await compactSession({
+          settings,
+          session: state.session,
+          ui,
+          signal: active.signal,
+          approve: permissions.approve,
+        });
+        await saveSession(state.session);
+        ui.notice(
+          done
+            ? `Conversation summarized${before ? ` from about ${before.toLocaleString()} tokens` : ''}.`
+            : 'There is nothing to summarize yet.',
+        );
+      } catch (error) {
+        ui.notice(active.signal.aborted ? 'Stopped summarizing.' : errorText(error));
+      } finally {
+        active = undefined;
+        app?.setBusy(undefined);
+      }
+    },
+    resume: async () => {
+      const sessions = (await listSessions(settings.cwd)).filter(
+        (item) => item.id !== state.session.id,
+      );
+      if (!sessions.length) {
+        ui.notice('No earlier conversations in this project.');
+        return;
+      }
+      const id = await app!.select(
+        'Continue which conversation?',
+        sessions.map((item) => ({
+          label: item.title,
+          value: item.id,
+          hint: `${duration(Date.now() - Date.parse(item.updatedAt))} ago · ${item.prompts} request${item.prompts === 1 ? '' : 's'}`,
+        })),
+      );
+      if (!id) return;
+      state.session = await loadSession(id);
+      replay();
+    },
+  });
   app = new InteractiveApp({
     stdin: process.stdin,
     ui: process.stderr,
@@ -450,25 +516,26 @@ program.action(async (options: CliOptions) => {
   app.print(
     `${theme.strong('ArnCode')} ${theme.muted(location.length > room ? `…${location.slice(1 - room)}` : location)}\n`,
   );
-  if (resumed) {
-    for (const entry of state.session.transcript.filter((item) => item.role !== 'tool').slice(-2)) {
-      const lines = entry.text.split('\n').slice(0, 3).join('\n');
-      if (entry.role === 'user') ui.user(lines);
-      else app.print(`${theme.muted(redact(lines))}\n`);
-    }
-  }
+  if (resumed) replay();
+  else if (options.resume === true) await state.resume?.();
   try {
     while (!closing) {
       const line = await app.nextPrompt();
       if (line === undefined) break;
       const trimmed = line.trim();
       if (trimmed.startsWith('/')) {
+        let result;
         try {
-          if ((await slashCommand(trimmed, state)) === 'exit') break;
+          result = await slashCommand(trimmed, state);
         } catch (error) {
           ui.notice(errorText(error));
         }
+        if (result === 'exit') break;
         app.render();
+        if (typeof result !== 'object') continue;
+        ui.user(trimmed);
+        await execute(result.prompt);
+        void indexFiles();
         continue;
       }
       void saveHistory(settings.cwd, line).catch(() => undefined);

@@ -4,26 +4,26 @@
 
 ## Command-line options
 
-| Option                                     | Behavior                                                                    |
-| ------------------------------------------ | --------------------------------------------------------------------------- |
-| `-p, --print [prompt]`                     | Run once; read stdin when the prompt is omitted                             |
-| `--output-format <format>`                 | With `-p`: `text` (default), `json`, or `stream-json`                       |
-| `--cwd <directory>`                        | Work in this directory; defaults to the current directory                   |
-| `--auth <type>`                            | Restrict credentials to `api-key` or `oauth`                                |
-| `--credential <name>`, `--profile <name>`  | Pin one credential without failover                                         |
-| `--model <id>`                             | Default: `claude-opus-5-5`                                                  |
-| `--base-url <url>`                         | Compatible Messages API endpoint; API-key mode only                         |
-| `--effort <level>`                         | `low`, `medium`, `high`, `xhigh`, or `max`; default: `medium`               |
-| `--fast`, `--no-fast`                      | Enable or disable fast mode; default: off                                   |
-| `--max-tokens <n>`                         | Maximum output tokens per API response; default: `64000`                    |
-| `--max-turns <n>`                          | Maximum agent turns per task; default: `80`                                 |
-| `-c, --continue`                           | Resume the newest session for the selected directory                        |
-| `-r, --resume <id>`                        | Resume a saved session; current directory or `--cwd` must match its project |
-| `--permission-mode <mode>`                 | `full` (default), `edits`, `ask`, or `plan`                                 |
-| `--plan`                                   | Start in plan mode                                                          |
-| `--safe`, `--ask`                          | Ask before writes, edits, and shell commands                                |
-| `--yolo`, `--dangerously-skip-permissions` | Select the default full-access mode                                         |
-| `--help`, `--version`                      | Show usage or version                                                       |
+| Option                                     | Behavior                                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| `-p, --print [prompt]`                     | Run once; read stdin when the prompt is omitted                            |
+| `--output-format <format>`                 | With `-p`: `text` (default), `json`, or `stream-json`                      |
+| `--cwd <directory>`                        | Work in this directory; defaults to the current directory                  |
+| `--auth <type>`                            | Restrict credentials to `api-key` or `oauth`                               |
+| `--credential <name>`, `--profile <name>`  | Pin one credential without failover                                        |
+| `--model <id>`                             | Default: `claude-opus-5-5`                                                 |
+| `--base-url <url>`                         | Compatible Messages API endpoint; API-key mode only                        |
+| `--effort <level>`                         | `low`, `medium`, `high`, `xhigh`, or `max`; default: `medium`              |
+| `--fast`, `--no-fast`                      | Enable or disable fast mode; default: off                                  |
+| `--max-tokens <n>`                         | Maximum output tokens per API response; default: `64000`                   |
+| `--max-turns <n>`                          | Maximum agent turns per task; default: `80`                                |
+| `-c, --continue`                           | Resume the newest session for the selected directory                       |
+| `-r, --resume [id]`                        | Resume a saved session; without an ID, choose from this project's sessions |
+| `--permission-mode <mode>`                 | `full` (default), `edits`, `ask`, or `plan`                                |
+| `--plan`                                   | Start in plan mode                                                         |
+| `--safe`, `--ask`                          | Ask before writes, edits, and shell commands                               |
+| `--yolo`, `--dangerously-skip-permissions` | Select the default full-access mode                                        |
+| `--help`, `--version`                      | Show usage or version                                                      |
 
 If both a prompt argument and piped input are present, ArnCode combines them. Assistant text goes to stdout, while progress, tools, diffs, and usage go to stderr:
 
@@ -45,24 +45,45 @@ Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt
 
 ## Interactive commands
 
-| Command           | Action                                                         |
-| ----------------- | -------------------------------------------------------------- |
-| `/help`           | Show commands                                                  |
-| `/model [id]`     | Show or change the model; `/model list` lists available models |
-| `/auth [type]`    | Show or select `api-key`, `oauth`, or `auto`                   |
-| `/mode [mode]`    | Show or select `full`, `edits`, `ask`, or `plan`               |
-| `/plan`           | Switch to plan mode                                            |
-| `/fast [on/off]`  | Toggle fast mode, or set `on` / `off`                          |
-| `/effort [level]` | Show or change effort                                          |
-| `/clear`          | Start a fresh conversation                                     |
-| `/cost`           | Show session usage and estimated cost                          |
-| `/creds`          | Show the credential bank                                       |
-| `/usage`          | Show usage by credential                                       |
-| `/exit`           | Leave the session                                              |
+| Command           | Action                                                       |
+| ----------------- | ------------------------------------------------------------ |
+| `/help`           | Show commands                                                |
+| `/model [id]`     | Choose the model; aliases `opus`, `sonnet`, `haiku`, `fable` |
+| `/auth [type]`    | Show or select `api-key`, `oauth`, or `auto`                 |
+| `/mode [mode]`    | Show or select `full`, `edits`, `ask`, or `plan`             |
+| `/plan`           | Switch to plan mode                                          |
+| `/fast [on/off]`  | Toggle fast mode, or set `on` / `off`                        |
+| `/effort [level]` | Show or change effort                                        |
+| `/compact`        | Summarize the conversation to free context                   |
+| `/context`        | Show context use and when the conversation is summarized     |
+| `/status`         | Show the model, permissions, credential, and plan limits     |
+| `/resume`         | Continue an earlier conversation in this project             |
+| `/init`           | Write or improve `AGENTS.md` for this project                |
+| `/export [file]`  | Save the conversation as Markdown in the project             |
+| `/clear`          | Start a fresh conversation                                   |
+| `/cost`           | Show session usage and estimated cost                        |
+| `/creds`          | Show the credential bank                                     |
+| `/usage`          | Show usage by credential                                     |
+| `/exit`           | Leave the session                                            |
 
 `/mode yolo` and `/mode default` select full access; `/mode safe` selects ask mode. Changing mode clears remembered session approvals. Without an interactive terminal, actions requiring approval are denied immediately with an explanation.
 
 In plan mode, read-only tools run, file writes are limited to `.arncode/plans/`, and shell commands need approval. The agent presents its plan with `exit_plan_mode`; approving it chooses the mode for the work. Without a terminal, the plan is printed and the run stops.
+
+### Custom commands
+
+Save a prompt as Markdown to run it as a command. Project commands live in `.arncode/commands/` or `.claude/commands/`; personal ones in `~/.arncode/commands/` or `~/.claude/commands/`. The file name is the command, and folders become namespaces: `git/commit.md` runs as `/git:commit`. Project commands win over personal ones, and built-in commands cannot be replaced.
+
+```md
+---
+description: Review a change for regressions
+argument-hint: <path>
+---
+
+Review $ARGUMENTS for behavior regressions and missing tests.
+```
+
+`$ARGUMENTS` receives everything after the command; `$1` to `$9` receive single arguments, and quotes group words. Without placeholders, the arguments follow the prompt. Commands appear in `/help` and Tab completion.
 
 ### Keys
 

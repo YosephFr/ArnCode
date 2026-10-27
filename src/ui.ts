@@ -5,6 +5,7 @@ import { redact, StreamingRedactor } from './redact.js';
 import type { InteractiveApp } from './tui/app.js';
 import { duration, fitWidth, padVisible, wrapText } from './tui/text.js';
 import { themeFor, type Theme } from './tui/theme.js';
+import { MarkdownStream, themeStyle } from './tui/markdown.js';
 import type { AgentUI, TodoItem } from './types.js';
 
 export function terminalText(value: string): string {
@@ -161,6 +162,7 @@ export class TerminalUI implements AgentUI {
   private line = '';
   private progressLine = '';
   private activeTodo?: string;
+  private markdown?: MarkdownStream;
 
   constructor(
     private readonly out: TerminalOutput = process.stdout,
@@ -175,6 +177,7 @@ export class TerminalUI implements AgentUI {
   attach(app: InteractiveApp, theme: Theme): void {
     this.app = app;
     this.theme = theme;
+    this.markdown = new MarkdownStream(themeStyle(theme), () => this.width);
   }
 
   detach(): void {
@@ -268,8 +271,11 @@ export class TerminalUI implements AgentUI {
     this.app.countTokens(Math.ceil(clean.length / 4));
     const lines = (this.line + clean).split('\n');
     this.line = lines.pop() ?? '';
-    if (lines.length) this.emit(lines.join('\n'), 'content');
-    this.app.setPreview(this.line ? wrapText(this.line, this.width) : []);
+    // Finished lines render once as Markdown; the unfinished one stays in the live preview.
+    const rows = lines.flatMap((line) => this.markdown!.line(line));
+    if (rows.length) this.app.print(`${rows.join('\n')}\n`, 'content');
+    const preview = this.markdown!.preview(this.line);
+    this.app.setPreview(preview ? preview.split('\n') : []);
     this.hasText = true;
   }
 
@@ -279,7 +285,8 @@ export class TerminalUI implements AgentUI {
     if (this.app) {
       const rest = this.line + clean;
       this.line = '';
-      if (rest) this.emit(rest, 'content');
+      const rows = [...(rest ? this.markdown!.line(rest) : []), ...this.markdown!.end()];
+      if (rows.length) this.app.print(`${rows.join('\n')}\n`, 'content');
       if (rest || this.hasText) this.app.setPreview([]);
       this.hasText = false;
       return;

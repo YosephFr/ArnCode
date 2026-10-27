@@ -8,7 +8,8 @@ import type {
   SDKRateLimitInfo,
 } from '@anthropic-ai/claude-agent-sdk';
 import { buildOAuthEnv } from '../auth.js';
-import { appendTranscript, portableContext } from '../session.js';
+import { appendTranscript, portableContext, transcriptText } from '../session.js';
+import { SUMMARY_INSTRUCTIONS } from '../summary.js';
 import { planModeReminder, subagentPrompt, systemPrompt } from '../prompt.js';
 import { emptyUsage, type UsageTotals } from '../usage.js';
 import { createPathPolicy, projectPath } from '../tools/paths.js';
@@ -380,6 +381,28 @@ export async function oauthOptions(
       append: await systemPrompt(ctx.settings.cwd, true),
     },
   };
+}
+
+/** Replace the portable transcript with a summary written by the model. */
+export async function compactOAuth(ctx: EngineContext): Promise<boolean> {
+  if (!ctx.session.transcript.length) return false;
+  const start = ctx.session.transcript.length;
+  ctx.ui.status('Compacting conversation');
+  await runOAuth(
+    ctx,
+    `<conversation>\n${transcriptText(ctx.session)}\n</conversation>\n\n${SUMMARY_INSTRUCTIONS}`,
+  );
+  const summary = ctx.session.transcript
+    .slice(start)
+    .filter((entry) => entry.role === 'assistant')
+    .map((entry) => entry.text)
+    .join('\n')
+    .trim();
+  if (!summary) return false;
+  ctx.session.transcript = [{ role: 'assistant', text: `[Conversation summary]\n${summary}` }];
+  ctx.session.compactions = (ctx.session.compactions ?? 0) + 1;
+  await ctx.checkpoint();
+  return true;
 }
 
 export function usageDifference(current: UsageTotals, previous = emptyUsage()): UsageTotals {

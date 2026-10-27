@@ -26,6 +26,7 @@ import {
   type ToolResult,
 } from '../tools/index.js';
 import { SubagentUI } from '../subagent-ui.js';
+import { SUMMARY_INSTRUCTIONS } from '../summary.js';
 import { emptyUsage, usageFromAPI } from '../usage.js';
 import type { Settings } from '../types.js';
 import type { EngineContext } from './types.js';
@@ -173,7 +174,9 @@ export function apiRequest(
       : {}),
     ...(fast ? { speed: 'fast' as const } : {}),
     ...(fallbacks ? { fallbacks: 'default' as const } : {}),
-    ...(options.compaction ? { compaction: { type: 'summarize' as const } } : {}),
+    ...(options.compaction
+      ? { compaction: { type: 'summarize' as const, instructions: SUMMARY_INSTRUCTIONS } }
+      : {}),
     ...(betas.size ? { betas: [...betas] } : {}),
   };
 }
