@@ -25,7 +25,7 @@
 | `--yolo`, `--dangerously-skip-permissions` | Select the default full-access mode                                        |
 | `--help`, `--version`                      | Show usage or version                                                      |
 
-If both a prompt argument and piped input are present, ArnCode combines them. Assistant text goes to stdout, while progress, tools, diffs, and usage go to stderr:
+If both a prompt argument and piped input are present, ArnCode combines them. When stdin is a socket that sends nothing for 3 seconds, as under some editors and agent harnesses, the run continues without it; a shell pipe is always read to its end. Assistant text goes to stdout, while progress, tools, diffs, and usage go to stderr:
 
 ```sh
 arncode -p "Describe this project in one paragraph" > description.txt
@@ -204,7 +204,7 @@ See [`.env.example`](../.env.example) for placeholders. ArnCode does not automat
 | `~/.arncode/AGENTS.md`        | Global instructions                                                                             |
 | `~/.arncode/skills/`          | Global skills                                                                                   |
 
-The state directory uses mode `700`; private JSON files use mode `600` and atomic writes. Redaction covers registered secrets and Anthropic token patterns in output and persisted conversations.
+The state directory uses mode `700`; private JSON files use mode `600` and atomic writes. Redaction covers registered secrets and Anthropic token patterns in output and ArnCode's saved conversations; the Agent SDK's own session files in `~/.arncode/claude` are not redacted (see `oauthSessions`).
 
 Costs are estimates based on known model pricing or the SDK's reported estimate. They do not represent invoices, subscription bills, or remaining quota. Unknown models, custom endpoints, and unsupported pricing combinations report unpriced usage. Usage displays uncached input, output, cache reads, and cache writes separately. Total input is uncached input plus cache-read and cache-write tokens; the uncached figure is not the full prompt size.
 
@@ -257,7 +257,7 @@ Hooks run your shell commands at points in a session, in the format Claude Code 
 | `Stop`             | When the agent finishes its reply | Sends the reason back as a request, up to three times |
 | `SessionStart`     | When a session starts or resumes  | Nothing to block; output is added as context          |
 
-Each hook receives JSON on stdin with `session_id`, `cwd`, `hook_event_name`, and, for tool events, `tool_name` and `tool_input` (`tool_response` after the call); `SessionStart` gets `source`, `startup` or `resume`. Matchers are regular expressions over tool names as Claude Code names them: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Task`, `TodoWrite`, `WebSearch`, and `WebFetch`, in both auth modes. A hook can also print `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}` or `additionalContext`. Hooks time out after 60 seconds unless `timeout` (seconds) says otherwise. They load from your configuration only; hooks defined inside a project are not run, so opening a repository never executes its commands.
+Each hook receives JSON on stdin with `session_id`, `cwd`, `hook_event_name`, and, for tool events, `tool_name` and `tool_input` (`tool_response` after the call); `SessionStart` gets `source`, `startup` or `resume`. Matchers are regular expressions over tool names as Claude Code names them: `Read`, `Write`, `Edit`, `Bash`, `BashOutput`, `KillShell`, `Glob`, `Grep`, `Task`, and `TodoWrite`, plus `WebSearch` and `WebFetch` in OAuth sessions. In API-key sessions web search and fetch run on Anthropic's servers, where hooks cannot see them, and OAuth's `TodoWrite` runs only `PostToolUse` hooks. A hook can also print `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}` or `additionalContext`. Hooks time out after 60 seconds unless `timeout` (seconds) says otherwise. They load from your configuration only; hooks defined inside a project are not run, so opening a repository never executes its commands.
 
 ### Protected paths
 
@@ -287,7 +287,7 @@ Inside a Git work tree, `glob`, `grep`, and `@` completion skip what `.gitignore
 
 `read_file` returns PNG, JPEG, GIF, and WebP files as images. Images that fit the model's limits (2,000 px on the longest side, its visual-token budget, and 1 MB) are sent unchanged; larger PNG and JPEG files are downscaled and re-encoded in process, as JPEG unless they have transparency. Each image is stored once beside its saved session and resent unchanged on later requests; the saved conversation keeps only a reference. When stored images approach the request size limit, the conversation is summarized. PDFs of up to 100 pages and 12 MiB are sent as documents, so the model reads both their text and their page images; they are stored the same way. OAuth sessions use the SDK's native Read tool for images and PDFs.
 
-In API-key sessions, a prompt can attach files: `@path` or `@"path with spaces"` mentions attach images, PDFs, and inline text files (up to 200 kB), and image paths pasted or dropped into the terminal are attached too. Protected paths are never attached.
+In API-key sessions, a prompt can attach files: `@path` or `@"path with spaces"` mentions attach images, PDFs, and inline text files (up to 200 kB), and image paths pasted or dropped into the terminal are attached too. Only what you type is searched for mentions, never piped input or hook output. Text files attach only from inside the project; images and PDFs may come from anywhere. Protected paths are never attached.
 
 OAuth uses SDK-native Read, Write, Edit, Bash, TodoWrite, Agent, WebFetch, and WebSearch tools, plus ArnCode's guarded searches, skill loader, and plan approval. Its `explore` and `general` agents mirror the API subagents. Full mode bypasses ArnCode approvals; ask mode applies its prompts through SDK hooks and callbacks. SDK-enforced restrictions still apply.
 

@@ -78,7 +78,7 @@ arncode --model claude-haiku-5-5 --effort low -p "List the entry points"
 
 Assistant text goes to stdout; progress, tools, diffs, and usage go to stderr. Piped input works without a TTY. In interactive sessions, a status bar shows the model, effort, mode, context use, plan usage, credential, and cost. You can type the next request while the agent works; Esc interrupts it. Slash commands such as `/model`, `/effort`, `/mode`, `/undo`, `/compact`, `/resume`, and `/theme` control the session (`/help` lists them all); Tab completes commands and `@` file mentions. Replies render as Markdown with highlighted code, and Markdown files in `.arncode/commands/` or `.claude/commands/` become your own slash commands. [Hooks](docs/reference.md#hooks) and [MCP servers](docs/reference.md#mcp-servers) use the same formats as Claude Code.
 
-The agent keeps a checklist for multi-step work, hands broad searches to subagents that run in parallel (read-only explorers use Claude Haiku 5.5 by default), and can search and fetch the web. Both modes can look at images and read PDFs. Reading a PNG, JPEG, GIF, or WebP file (a screenshot or a rendered frame) shows it to the model, and `@path` mentions or pasted image paths in a prompt attach the file directly. Large images are downscaled before they are sent.
+The agent keeps a checklist for multi-step work, hands broad searches to subagents that run in parallel (read-only explorers use Claude Haiku 5.5 by default), and can search and fetch the web. Both modes can look at images and read PDFs. Reading a PNG, JPEG, GIF, or WebP file (a screenshot or a rendered frame) shows it to the model, and in API-key sessions `@path` mentions or pasted image paths attach the file directly; OAuth sessions read mentioned files with the Read tool. Large images are downscaled before they are sent.
 
 The default model is `claude-opus-5-5`, with adaptive thinking and medium effort. Fast mode, prompt caching, bounded output, and finite retry/turn limits are supported. See the [full command reference](docs/reference.md#command-line-options).
 
@@ -166,9 +166,9 @@ The integrations follow Anthropic's [Messages API](https://platform.claude.com/d
 
 Planned work:
 
-- Token-aware conversation summaries for longer sessions.
-- Optional web retrieval and additional tool integrations.
-- More commands for inspecting and exporting sessions.
+- Permission rules for specific commands and paths, kept across sessions.
+- Background shells in OAuth sessions.
+- Larger benchmark tasks and published comparison runs.
 - Windows process management without WSL.
 
 ## Contributing
