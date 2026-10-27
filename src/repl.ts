@@ -296,7 +296,13 @@ export async function slashCommand(line: string, state: ReplState): Promise<Slas
           budget < window
             ? `Summarized automatically at ${compactNumber(budget)}; the model's window is ${compactNumber(window)}.`
             : `The model's window is ${compactNumber(window)}.`,
-          `${session.messages.length} messages${session.compactions ? `, summarized ${session.compactions} time${session.compactions === 1 ? '' : 's'}` : ''}${images ? `, ${compactNumber(images / 1024)} KB of images` : ''}.`,
+          ...(session.engine === 'api-key'
+            ? [
+                `${session.messages.length} messages${session.compactions ? `, summarized ${session.compactions} time${session.compactions === 1 ? '' : 's'}` : ''}${images ? `, ${compactNumber(images / 1024)} KB of images` : ''}.`,
+              ]
+            : session.compactions
+              ? [`Summarized ${session.compactions} time${session.compactions === 1 ? '' : 's'}.`]
+              : []),
         ].join('\n'),
       );
       break;

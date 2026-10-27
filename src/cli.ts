@@ -19,7 +19,7 @@ import { MODE_LABELS, planUsageFrom, statusLine, type PlanUsage } from './status
 import { InteractiveApp, type Suggestion } from './tui/app.js';
 import { themeFor } from './tui/theme.js';
 import { duration } from './tui/text.js';
-import { TerminalUI, displayName, toolSummary } from './ui.js';
+import { TerminalUI, displayName, setDisplayRoot, toolSummary } from './ui.js';
 import { formatUsage } from './usage.js';
 import { usageDifference } from './engines/oauth.js';
 import { JsonUI, type OutputFormat } from './json-output.js';
@@ -147,6 +147,7 @@ program.action(async (options: CliOptions) => {
     throw new Error(`Project directory does not exist: ${settings.cwd}`);
   });
   if (!(await stat(settings.cwd)).isDirectory()) throw new Error('--cwd must be a directory.');
+  setDisplayRoot(settings.cwd);
   const input = new TerminalInput();
   const oneShot = options.print !== undefined || !input.interactive;
   let piped = '';

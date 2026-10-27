@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { createTwoFilesPatch, structuredPatch } from 'diff';
 import pc from 'picocolors';
@@ -14,16 +15,29 @@ export function terminalText(value: string): string {
     .join('');
 }
 
+let displayRoot: string | undefined;
+
+/** Show paths under this directory relative to it, as the agent's own tools do. */
+export function setDisplayRoot(directory: string): void {
+  displayRoot = directory;
+}
+
+function shownPath(value: unknown): unknown {
+  if (typeof value !== 'string' || !displayRoot || !path.isAbsolute(value)) return value;
+  const relative = path.relative(displayRoot, value);
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : value;
+}
+
 export function toolSummary(name: string, input: Record<string, unknown>): string {
   const where =
     typeof input.path === 'string' && input.path !== '.' && input.pattern !== undefined
-      ? ` in ${input.path}`
+      ? ` in ${String(shownPath(input.path))}`
       : '';
   const detail =
     input.command ??
     (input.pattern === undefined ? undefined : `${String(input.pattern)}${where}`) ??
-    input.file_path ??
-    input.path ??
+    shownPath(input.file_path) ??
+    shownPath(input.path) ??
     input.url ??
     input.query ??
     input.description ??

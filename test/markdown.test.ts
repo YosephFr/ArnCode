@@ -32,7 +32,7 @@ describe('streaming Markdown', () => {
       '  • nested',
       '1. first',
       '○ todo',
-      '● done',
+      '✓ done',
       '  quoted',
       'See docs (https://x.dev/a)',
       '',

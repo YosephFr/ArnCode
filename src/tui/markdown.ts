@@ -656,7 +656,8 @@ export class MarkdownStream {
     const { lists } = this.state;
     while (lists.length && lists.at(-1)!.indent >= indent) lists.pop();
     const task = TASK.exec(body);
-    const box = task ? (task[1] === ' ' ? '○' : '●') : '';
+    // Matches the agent's checklist; the filled dot marks tool calls.
+    const box = task ? (task[1] === ' ' ? '○' : '✓') : '';
     const symbol = /\d/.test(marker) ? `${marker}${box && ` ${box}`}` : box || '•';
     const lead = 2 * depth + 2 * lists.length;
     const content = lead + stringWidth(symbol) + 1;
