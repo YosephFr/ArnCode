@@ -31,6 +31,18 @@ export function planModeReminder(nativeTools = false): string {
   return `Plan mode is on. Explore with read-only tools and ask the user when something is unclear. Do not change files or run commands that change state; you may write the plan under .arncode/plans/. When the plan is complete, call ${nativeTools ? 'mcp__arncode__exit_plan_mode' : 'exit_plan_mode'} with it.`;
 }
 
+/** Instructions for a subagent: one delegated task, no questions, a concise final report. */
+export async function subagentPrompt(cwd: string, kind: 'explore' | 'general'): Promise<string> {
+  const role =
+    kind === 'explore'
+      ? 'You are a read-only subagent. Search and read to answer the delegated question; you cannot change files.'
+      : 'You are a subagent working on one delegated task. You may edit files and run commands when the task requires it.';
+  return `${role}
+You cannot ask the user questions and nobody sees your intermediate output. Work efficiently: use parallel tool calls for independent searches and reads, and stop as soon as you can answer. Finish with a concise report of what you found or changed, citing file paths and line numbers, and anything left unresolved.
+
+${await systemPrompt(cwd)}`;
+}
+
 export const PLAN_MODE_OFF = 'Plan mode is off. You may change files and run commands again.';
 
 export async function systemPrompt(cwd: string, nativeTools = false): Promise<string> {

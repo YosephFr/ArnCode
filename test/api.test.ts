@@ -59,10 +59,32 @@ describe('API request shape', () => {
       'thinking-binding-controls-2026-08-01',
       'server-side-fallback-2026-07-01',
     ]);
-    expect(request.tools?.every((tool) => 'eager_input_streaming' in tool)).toBe(true);
+    const [search, fetch, ...client] = request.tools ?? [];
+    expect(search).toMatchObject({ type: 'web_search_20260209', name: 'web_search', max_uses: 5 });
+    expect(fetch).toMatchObject({ type: 'web_fetch_20260209', name: 'web_fetch' });
+    expect(client.every((tool) => 'eager_input_streaming' in tool)).toBe(true);
+    expect(client.at(-1)).toMatchObject({ cache_control: { type: 'ephemeral' } });
     expect(markers(request)).toBe(3);
     expect(request).not.toHaveProperty('speed');
     expect(request).not.toHaveProperty('compaction');
+  });
+
+  it('leaves out web tools when disabled, for subagents and on unsupported models', () => {
+    const off = setup({ webTools: false });
+    expect(JSON.stringify(apiRequest(off.settings, off.session, 'full').tools)).not.toContain(
+      'web_search',
+    );
+    const haiku = setup({ model: 'claude-haiku-5-5' });
+    expect(JSON.stringify(apiRequest(haiku.settings, haiku.session, 'full').tools)).not.toContain(
+      'web_search',
+    );
+    const explorer = setup();
+    explorer.session.api = { system: 'x', effort: 'low', tools: ['read_file', 'grep'] };
+    expect(
+      apiRequest(explorer.settings, explorer.session, 'full').tools?.map(
+        (tool) => (tool as { name: string }).name,
+      ),
+    ).toEqual(['read_file', 'grep']);
   });
 
   it('sends only compatible fields to other endpoints', () => {

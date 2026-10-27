@@ -20,6 +20,7 @@ const readOnlyTools = new Set([
   'skill',
   'todo_write',
   'exit_plan_mode',
+  'task',
   'mcp__arncode__skill',
   'mcp__arncode__glob',
   'mcp__arncode__grep',
@@ -30,6 +31,7 @@ const readOnlyTools = new Set([
   'LS',
   'TodoWrite',
   'ExitPlanMode',
+  'Agent',
 ]);
 
 const editTools = new Set([

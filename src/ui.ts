@@ -5,7 +5,7 @@ import { redact, StreamingRedactor } from './redact.js';
 import type { InteractiveApp } from './tui/app.js';
 import { duration, fitWidth, padVisible, wrapText } from './tui/text.js';
 import { themeFor, type Theme } from './tui/theme.js';
-import type { AgentUI } from './types.js';
+import type { AgentUI, TodoItem } from './types.js';
 
 export function terminalText(value: string): string {
   return [...stripVTControlCharacters(value)]
@@ -14,8 +14,20 @@ export function terminalText(value: string): string {
 }
 
 export function toolSummary(name: string, input: Record<string, unknown>): string {
+  const where =
+    typeof input.path === 'string' && input.path !== '.' && input.pattern !== undefined
+      ? ` in ${input.path}`
+      : '';
   const detail =
-    input.command ?? input.path ?? input.file_path ?? input.pattern ?? input.name ?? '';
+    input.command ??
+    (input.pattern === undefined ? undefined : `${String(input.pattern)}${where}`) ??
+    input.file_path ??
+    input.path ??
+    input.url ??
+    input.query ??
+    input.description ??
+    input.name ??
+    '';
   const summary = terminalText(redact(`${name} ${String(detail)}`))
     .replace(/\s+/g, ' ')
     .trim();
@@ -58,6 +70,11 @@ export function formatToolResult(
 }
 
 const DISPLAY_NAMES: Record<string, string> = {
+  todo_write: 'Todos',
+  TodoWrite: 'Todos',
+  task: 'Task',
+  web_search: 'Web search',
+  web_fetch: 'Fetch',
   read_file: 'Read',
   write_file: 'Write',
   edit_file: 'Edit',
@@ -143,6 +160,7 @@ export class TerminalUI implements AgentUI {
   private theme: Theme;
   private line = '';
   private progressLine = '';
+  private activeTodo?: string;
 
   constructor(
     private readonly out: TerminalOutput = process.stdout,
@@ -173,6 +191,31 @@ export class TerminalUI implements AgentUI {
     if (!this.app) return;
     const lines = text.split('\n').flatMap((line) => (line ? wrapText(line, this.width) : ['']));
     this.app.print(`${lines.join('\n')}\n`, stream);
+  }
+
+  todos(items: TodoItem[]): void {
+    this.endText();
+    this.endProgress();
+    this.activeTodo = items.find((item) => item.status === 'in_progress')?.activeForm;
+    if (!items.length) return;
+    const rows = items.map((item) => {
+      const text = terminalText(redact(item.content));
+      if (!this.app)
+        return `${item.status === 'completed' ? '[x]' : item.status === 'in_progress' ? '[>]' : '[ ]'} ${text}`;
+      if (item.status === 'completed') return this.theme.muted(`✓ ${text}`);
+      if (item.status === 'in_progress')
+        return `${this.theme.accent('◐')} ${this.theme.strong(text)}`;
+      return `○ ${text}`;
+    });
+    if (!this.app) {
+      this.err.write(`${rows.join('\n')}\n`);
+      return;
+    }
+    this.emit(
+      rows
+        .map((row, index) => `${index ? '     ' : `  ${this.theme.muted('⎿')}  `}${row}`)
+        .join('\n'),
+    );
   }
 
   /** A proposed plan, shown in full before the user approves it. */
@@ -294,7 +337,8 @@ export class TerminalUI implements AgentUI {
       .replace(/\b(?:read_file|write_file|edit_file|list_dir|glob|grep|bash|skill)\b/g, displayName)
       .slice(0, 160);
     if (this.app) {
-      this.app.setBusy(label);
+      // While a checklist item is in progress, its wording says more than "Thinking".
+      this.app.setBusy(label === 'Thinking' && this.activeTodo ? this.activeTodo : label);
       return;
     }
     this.idle();

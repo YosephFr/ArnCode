@@ -137,6 +137,7 @@ Settings resolve in this order: command-line flags, environment variables, `~/.a
   "maxTokens": 64000,
   "maxTurns": 80,
   "compactAt": 200000,
+  "webTools": true,
   "permissionMode": "full"
 }
 ```
@@ -157,6 +158,7 @@ Use `"permissionMode": "ask"` for persistent approval prompts. A configured `aut
 | `ARNCODE_MAX_TURNS`                | Maximum turns per task                                                 |
 | `ARNCODE_COMPACT_AT`               | Context size in tokens at which API conversations are summarized       |
 | `ARNCODE_API_FEATURES`             | `full` or `basic`; overrides the endpoint-based feature selection      |
+| `ARNCODE_EXPLORE_MODEL`            | Model for read-only `explore` subagents in API-key mode                |
 | `ARNCODE_CONFIG_DIR`               | Alternate directory for state, global instructions, and ArnCode skills |
 
 See [`.env.example`](../.env.example) for placeholders. ArnCode does not automatically load `.env` files. Relative `ARNCODE_CONFIG_DIR` paths resolve from the current working directory; credential storage must stay outside Git repositories.
@@ -194,7 +196,11 @@ OAuth uses the same guarded `glob` and `grep` searches as API-key mode through i
 
 ## Tools and limits
 
-The API backend provides `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `bash`, and `skill`. Exact edits require a unique match unless `replace_all` is requested. File paths stay inside the project and reject escaping symlinks; shell commands have the account's filesystem and network access.
+The API backend provides `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `bash`, `skill`, `todo_write`, `task`, and `exit_plan_mode`.
+
+`todo_write` keeps a checklist for multi-step work; the terminal shows it and names the item in progress. `task` hands a self-contained job to a subagent with its own context, which returns only its final report; several can run in parallel. An `explore` subagent is read-only and uses Claude Haiku 5.5 at low effort on the official endpoint (`ARNCODE_EXPLORE_MODEL` overrides it); a `general` subagent uses the session's model and can edit files and run commands. Subagents use the session's credential, permissions, and protected paths, and their usage counts toward the session.
+
+On the official endpoint, models that support them also get Anthropic's server-side `web_search` (up to 5 searches per request) and `web_fetch` tools. Web search is billed per search by Anthropic. Set `"webTools": false` in configuration to turn both off in either mode. Exact edits require a unique match unless `replace_all` is requested. File paths stay inside the project and reject escaping symlinks; shell commands have the account's filesystem and network access.
 
 Read ranges, searches, and command output are bounded to about 10,000 tokens per result, and lines longer than 2,000 characters (500 in search results) are shortened. Command output keeps its first 4,000 and last 16,000 characters per stream; when output is cut, the complete output is saved to a private temporary file named in the result, so the model can search it instead of running the command again. Saved output is removed after a day. Shell timeouts default to two minutes and can be requested up to thirty minutes. The managed process group is stopped on timeout, cancellation, or shell exit, so API tools do not support persistent background servers. Linux and macOS support this process-group cleanup; use WSL on Windows.
 
@@ -202,6 +208,6 @@ Read ranges, searches, and command output are bounded to about 10,000 tokens per
 
 In API-key sessions, a prompt can attach files: `@path` or `@"path with spaces"` mentions attach images and inline text files (up to 200 kB), and image paths pasted or dropped into the terminal are attached too. Protected paths are never attached.
 
-OAuth uses SDK-native Read, Write, Edit, and Bash tools, plus ArnCode's guarded searches and skill loader. Full mode bypasses ArnCode approvals; ask mode applies its prompts through SDK hooks and callbacks. SDK-enforced restrictions still apply.
+OAuth uses SDK-native Read, Write, Edit, Bash, TodoWrite, Agent, WebFetch, and WebSearch tools, plus ArnCode's guarded searches, skill loader, and plan approval. Its `explore` and `general` agents mirror the API subagents. Full mode bypasses ArnCode approvals; ask mode applies its prompts through SDK hooks and callbacks. SDK-enforced restrictions still apply.
 
 Skills contain YAML frontmatter with `name` and `description`. Their metadata is placed in the initial prompt; the body is loaded only when requested. Discovery order is project `.arncode/skills`, project `.claude/skills`, global ArnCode `skills`, then `~/.claude/skills`; the first matching name wins. Skill bodies are limited to 120 kB.

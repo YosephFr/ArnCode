@@ -687,6 +687,71 @@ describe('official-endpoint API features', () => {
     expect(files.some((name) => name.endsWith('.blobs'))).toBe(true);
   }, 30_000);
 
+  it('delegates to a read-only subagent and keeps a checklist', async () => {
+    await writeFile(path.join(project, 'auth.ts'), 'export const login = () => true;\n');
+    const api = await mockAPI([
+      {
+        tool: {
+          name: 'todo_write',
+          id: 'plan_steps',
+          input: {
+            todos: [
+              {
+                content: 'Find the login code',
+                status: 'in_progress',
+                activeForm: 'Finding the login code',
+              },
+              { content: 'Summarize it', status: 'pending', activeForm: 'Summarizing it' },
+            ],
+          },
+        },
+      },
+      {
+        tool: {
+          name: 'task',
+          id: 'explore_auth',
+          input: { description: 'find login', prompt: 'Find where login is defined.' },
+        },
+      },
+      { tool: { name: 'grep', id: 'sub_grep', input: { pattern: 'login' } } },
+      { text: ['login is defined in auth.ts:1.'] },
+      { text: ['Login lives in auth.ts.\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Where is login?'], '', full);
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toBe('Login lives in auth.ts.\n');
+    expect(run.stderr).toContain('[>] Find the login code');
+    expect(run.stderr).toContain('find login · Search login');
+    const sub = api.requests[2]!.body;
+    expect(sub.model).toBe('claude-haiku-5-5');
+    expect(sub.output_config).toEqual({ effort: 'low' });
+    expect(JSON.stringify(sub.system)).toContain('read-only subagent');
+    expect(sub.tools?.map((tool) => (tool as { name: string }).name)).toEqual([
+      'read_file',
+      'list_dir',
+      'glob',
+      'grep',
+      'skill',
+    ]);
+    expect(sub.messages[0]).toMatchObject({ role: 'user' });
+    expect(JSON.stringify(sub.messages[0])).toContain('Find where login is defined.');
+    expect(api.requests[4]!.body.messages.at(-1)).toMatchObject({
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'explore_auth',
+          content: 'login is defined in auth.ts:1.\n\n[1 tool call]',
+        },
+      ],
+    });
+    const [file] = (await readdir(path.join(config, 'sessions'))).filter((name) =>
+      name.endsWith('.json'),
+    );
+    const saved = JSON.parse(await readFile(path.join(config, 'sessions', file!), 'utf8'));
+    expect(saved.todos).toHaveLength(2);
+    expect(saved.usage.requests).toBe(5);
+  }, 30_000);
+
   it('reports refusal fallbacks and explains final refusals', async () => {
     const api = await mockAPI([
       {

@@ -24,8 +24,17 @@ export interface Settings {
   maxTurns: number;
   /** Context size in tokens at which API conversations are summarized. */
   compactAt: number;
+  /** Web search and fetch: server tools in API mode, native tools in OAuth mode. */
+  webTools: boolean;
   permissionMode: PermissionMode;
   protectedPaths: string[];
+}
+
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  /** Present-tense wording shown while the item is in progress. */
+  activeForm: string;
 }
 
 export interface AgentUI {
@@ -43,6 +52,8 @@ export interface AgentUI {
     options?: { isError?: boolean; durationMs?: number },
   ): void;
   diff(path: string, before: string, after: string): void;
+  /** Show the agent's current checklist. */
+  todos?(items: TodoItem[]): void;
 }
 
 export interface Approval {

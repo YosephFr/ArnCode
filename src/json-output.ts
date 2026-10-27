@@ -1,7 +1,7 @@
 import { structuredPatch } from 'diff';
 import { redact } from './redact.js';
 import type { Session } from './session.js';
-import type { AgentUI } from './types.js';
+import type { AgentUI, TodoItem } from './types.js';
 import type { UsageTotals } from './usage.js';
 
 export type OutputFormat = 'text' | 'json' | 'stream-json';
@@ -71,6 +71,10 @@ export class JsonUI implements AgentUI {
       duration_ms: options.durationMs ?? null,
       output: redact(output).slice(0, 4000),
     });
+  }
+
+  todos(items: TodoItem[]): void {
+    this.emit({ type: 'todos', items: JSON.parse(redact(JSON.stringify(items))) });
   }
 
   diff(path: string, before: string, after: string): void {

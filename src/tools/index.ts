@@ -3,7 +3,7 @@ import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import type { AgentUI, Approve, ExitPlan } from '../types.js';
+import type { AgentUI, Approve, ExitPlan, TodoItem } from '../types.js';
 import { redact } from '../redact.js';
 import { editText, listDirectory, readImage, readText, truncate, writeText } from './files.js';
 import type { PreparedImage } from '../images.js';
@@ -18,6 +18,28 @@ const filePath = z.string().min(1).max(4096);
 const schemas = {
   skill: z.object({ name: z.string().min(1).max(64) }).strict(),
   exit_plan_mode: z.object({ plan: z.string().min(1).max(200_000) }).strict(),
+  task: z
+    .object({
+      description: z.string().min(1).max(200),
+      prompt: z.string().min(1).max(100_000),
+      subagent_type: z.enum(['explore', 'general']).default('explore'),
+    })
+    .strict(),
+  todo_write: z
+    .object({
+      todos: z
+        .array(
+          z
+            .object({
+              content: z.string().min(1).max(500),
+              status: z.enum(['pending', 'in_progress', 'completed']),
+              activeForm: z.string().min(1).max(500),
+            })
+            .strict(),
+        )
+        .max(50),
+    })
+    .strict(),
   read_file: z
     .object({
       path: filePath,
@@ -77,11 +99,13 @@ async function outputLogPath(): Promise<string> {
 }
 
 // Tools without side effects can run concurrently within one model turn.
-const parallelSafe = new Set(['read_file', 'list_dir', 'glob', 'grep', 'skill']);
+const parallelSafe = new Set(['read_file', 'list_dir', 'glob', 'grep', 'skill', 'task']);
 
 export function isParallelSafe(name: string): boolean {
   return parallelSafe.has(name);
 }
+
+export type SubagentRequest = z.infer<(typeof schemas)['task']>;
 
 export type ToolContent = { type: 'text'; text: string } | { type: 'image'; image: PreparedImage };
 
@@ -108,6 +132,12 @@ export function describeImage(file: string, image: PreparedImage): string {
   return `Image ${file} (${source}${sent})`;
 }
 
+export function todoSummary(todos: TodoItem[]): string {
+  const done = todos.filter((item) => item.status === 'completed').length;
+  const active = todos.find((item) => item.status === 'in_progress');
+  return `Todos updated: ${done}/${todos.length} completed${active ? `; in progress: ${active.content}` : ''}.`;
+}
+
 /** Text form of a result, for transcripts, terminal output and text-only consumers. */
 export function resultText(result: ToolResult): string {
   if (typeof result.content === 'string') return result.content;
@@ -126,6 +156,11 @@ export class ToolRunner {
       ui: AgentUI;
       protectedPaths?: readonly string[];
       exitPlan?: ExitPlan;
+      onTodos?: (items: TodoItem[]) => void;
+      /** Run a subagent; absent where subagents are unavailable, such as inside one. */
+      subagent?: (input: SubagentRequest, signal?: AbortSignal) => Promise<ToolResult>;
+      /** Tools this runner may execute; every tool when absent. */
+      allowedTools?: readonly string[];
     },
   ) {}
 
@@ -147,6 +182,8 @@ export class ToolRunner {
     try {
       signal?.throwIfAborted();
       if (!Object.hasOwn(schemas, name)) throw new Error(`Unknown tool: ${name}`);
+      if (this.options.allowedTools && !this.options.allowedTools.includes(name))
+        throw new Error(`${name} is not available to this agent.`);
       const tool = name as keyof typeof schemas;
       const parsed = schemas[tool].safeParse(input);
       if (!parsed.success) {
@@ -157,10 +194,9 @@ export class ToolRunner {
       }
       const value = parsed.data;
       const cwd = await realpath(this.options.cwd);
-      const policy =
-        tool === 'bash' || tool === 'skill' || tool === 'exit_plan_mode'
-          ? undefined
-          : await createPathPolicy(cwd, this.options.protectedPaths);
+      const policy = ['bash', 'skill', 'exit_plan_mode', 'todo_write', 'task'].includes(tool)
+        ? undefined
+        : await createPathPolicy(cwd, this.options.protectedPaths);
       this.options.ui.tool(name, value);
       const approval = await this.options.approve(name, value, signal);
       if (!approval.allowed) {
@@ -171,6 +207,18 @@ export class ToolRunner {
       this.options.ui.status(`Running ${name}`);
       let content: string;
       switch (tool) {
+        case 'task': {
+          if (!this.options.subagent) throw new Error('Subagents are not available here.');
+          return await this.options.subagent(schemas.task.parse(value), signal);
+        }
+        case 'todo_write': {
+          const { todos } = schemas.todo_write.parse(value);
+          if (todos.filter((item) => item.status === 'in_progress').length > 1)
+            throw new Error('Mark at most one item in_progress at a time.');
+          this.options.onTodos?.(todos);
+          this.options.ui.todos?.(todos);
+          return { content: todoSummary(todos) };
+        }
         case 'exit_plan_mode': {
           const { plan } = schemas.exit_plan_mode.parse(value);
           if (!this.options.exitPlan) {

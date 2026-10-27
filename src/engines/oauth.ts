@@ -9,14 +9,14 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { buildOAuthEnv } from '../auth.js';
 import { appendTranscript, portableContext } from '../session.js';
-import { planModeReminder, systemPrompt } from '../prompt.js';
+import { planModeReminder, subagentPrompt, systemPrompt } from '../prompt.js';
 import { emptyUsage, type UsageTotals } from '../usage.js';
 import { createPathPolicy, projectPath } from '../tools/paths.js';
 import { ToolRunner, resultText, toolSchemas } from '../tools/index.js';
 import { discoverSkills, loadSkill } from '../skills.js';
 import { z } from 'zod';
 import { redact, StreamingRedactor } from '../redact.js';
-import type { Approval } from '../types.js';
+import type { Approval, TodoItem } from '../types.js';
 import type { EngineContext } from './types.js';
 import { OAuthUsageTracker } from './oauth-usage.js';
 
@@ -106,6 +106,12 @@ export async function oauthOptions(
     if (input.hook_event_name !== 'PreToolUse') return {};
     const args = record(input.tool_input);
     const displayName = input.tool_name.replace(/^mcp__arncode__/, '');
+    if (input.tool_name === 'TodoWrite' && Array.isArray(args.todos)) {
+      const items = args.todos as TodoItem[];
+      ctx.session.todos = items;
+      ctx.ui.todos?.(items);
+      return {};
+    }
     ctx.ui.tool(displayName, args);
     try {
       if (
@@ -317,7 +323,31 @@ export async function oauthOptions(
     settingSources: [],
     mcpServers,
     strictMcpConfig: true,
-    tools: ['Read', 'Write', 'Edit', 'Bash'],
+    tools: [
+      'Read',
+      'Write',
+      'Edit',
+      'Bash',
+      'TodoWrite',
+      'Agent',
+      ...(ctx.settings.webTools ? ['WebFetch', 'WebSearch'] : []),
+    ],
+    agents: {
+      explore: {
+        description:
+          'Read-only investigation: searches and reads the project, then reports findings with file paths. Use it for broad searches whose intermediate output you do not need.',
+        prompt: await subagentPrompt(ctx.settings.cwd, 'explore'),
+        tools: ['Read', 'mcp__arncode__glob', 'mcp__arncode__grep'],
+        model: 'haiku',
+        effort: 'low',
+      },
+      general: {
+        description:
+          'Delegated work that may edit files and run commands; reports what it changed.',
+        prompt: await subagentPrompt(ctx.settings.cwd, 'general'),
+        tools: ['Read', 'Write', 'Edit', 'Bash', 'mcp__arncode__glob', 'mcp__arncode__grep'],
+      },
+    },
     // ArnCode enforces edits, ask and plan modes itself through hooks and canUseTool.
     permissionMode: ctx.settings.permissionMode === 'full' ? 'bypassPermissions' : 'default',
     allowDangerouslySkipPermissions: ctx.settings.permissionMode === 'full',

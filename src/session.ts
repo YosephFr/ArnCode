@@ -6,7 +6,7 @@ import { getConfigDir } from './config.js';
 import { atomicWriteJson, readJson } from './storage.js';
 import { redact } from './redact.js';
 import { emptyUsage, type UsageTotals } from './usage.js';
-import type { AuthMode, Effort, Settings } from './types.js';
+import type { AuthMode, Effort, Settings, TodoItem } from './types.js';
 
 export interface TranscriptEntry {
   role: 'user' | 'assistant' | 'tool';
@@ -22,6 +22,8 @@ export interface ApiConversation {
   messageEffort?: Effort;
   /** Whether the model was last told that plan mode is on. */
   planMode?: boolean;
+  /** Tools declared for this conversation; all tools when absent. */
+  tools?: string[];
 }
 
 export interface Session {
@@ -41,6 +43,8 @@ export interface Session {
   contextTokens?: number;
   api?: ApiConversation;
   compactions?: number;
+  /** The latest checklist the agent wrote. */
+  todos?: TodoItem[];
 }
 
 export function newSession(settings: Settings): Session {

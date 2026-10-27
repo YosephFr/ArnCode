@@ -16,15 +16,17 @@ import { hydrateMessages, referencedBytes, storeBlob } from '../blobs.js';
 import { classifyCredentialFailure } from '../failures.js';
 import { modelEffort, modelFeatures } from '../models.js';
 import { appendTranscript, apiContext, type Session } from '../session.js';
-import { PLAN_MODE_OFF, planModeReminder, systemPrompt } from '../prompt.js';
+import { PLAN_MODE_OFF, planModeReminder, subagentPrompt, systemPrompt } from '../prompt.js';
 import {
   ToolRunner,
   isParallelSafe,
   resultText,
   toolDefinitions,
+  type SubagentRequest,
   type ToolResult,
 } from '../tools/index.js';
-import { usageFromAPI } from '../usage.js';
+import { SubagentUI } from '../subagent-ui.js';
+import { emptyUsage, usageFromAPI } from '../usage.js';
 import type { Settings } from '../types.js';
 import type { EngineContext } from './types.js';
 
@@ -122,6 +124,9 @@ export function apiRequest(
 ): BetaMessageStreamParams {
   const features = modelFeatures(settings.model);
   const conversation = session.api ?? { system: '', effort: settings.effort };
+  const tools = conversation.tools
+    ? toolDefinitions.filter((tool) => conversation.tools!.includes(tool.name))
+    : toolDefinitions;
   const full = mode === 'full';
   const betas = new Set<string>();
   // Full mode never rewrites earlier turns: edits would invalidate later thinking blocks and the
@@ -147,13 +152,20 @@ export function apiRequest(
     model: settings.model,
     max_tokens: options.compaction ? Math.min(settings.maxTokens, 32_000) : settings.maxTokens,
     system: [{ type: 'text', text: conversation.system, cache_control: { type: 'ephemeral' } }],
-    tools: toolDefinitions.map((tool, index) => ({
-      ...tool,
-      ...(full ? { eager_input_streaming: true } : {}),
-      ...(index === toolDefinitions.length - 1
-        ? { cache_control: { type: 'ephemeral' as const } }
-        : {}),
-    })),
+    tools: [
+      // Server tools run on Anthropic's side; client tools follow so the cache marker stays last.
+      ...(full && settings.webTools && features.webTools && !conversation.tools
+        ? [
+            { type: 'web_search_20260209' as const, name: 'web_search' as const, max_uses: 5 },
+            { type: 'web_fetch_20260209' as const, name: 'web_fetch' as const, max_uses: 10 },
+          ]
+        : []),
+      ...tools.map((tool, index) => ({
+        ...tool,
+        ...(full ? { eager_input_streaming: true } : {}),
+        ...(index === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {}),
+      })),
+    ],
     messages: cacheConversation(messages),
     ...(thinking ? { thinking } : {}),
     ...(features.adaptive
@@ -387,27 +399,92 @@ function estimateTokens(value: unknown): number {
   return Math.ceil(JSON.stringify(value).length / 3);
 }
 
+const EXPLORE_TOOLS = ['read_file', 'list_dir', 'glob', 'grep', 'skill'];
+const GENERAL_TOOLS = [...EXPLORE_TOOLS, 'write_file', 'edit_file', 'bash', 'todo_write'];
+const SUBAGENT_TURNS = 40;
+
+/** Explorers default to the fast, inexpensive Haiku on the official endpoint. */
+export function subagentModel(
+  settings: Settings,
+  kind: SubagentRequest['subagent_type'],
+  env: NodeJS.ProcessEnv = process.env,
+): { model: string; effort: Settings['effort'] } {
+  if (kind === 'general') return { model: settings.model, effort: settings.effort };
+  const model =
+    env.ARNCODE_EXPLORE_MODEL ??
+    (apiMode(settings, env) === 'full' && settings.model.startsWith('claude-')
+      ? 'claude-haiku-5-5'
+      : settings.model);
+  return { model, effort: 'low' };
+}
+
+function lastAssistantText(messages: BetaMessageParam[]): string {
+  for (const message of [...messages].reverse()) {
+    if (message.role !== 'assistant') continue;
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+            .join('\n');
+    if (text.trim()) return text.trim();
+  }
+  return '';
+}
+
+/** Run a delegated task in a fresh conversation and return only its final report. */
+async function runSubagent(
+  parent: EngineContext,
+  request: SubagentRequest,
+  signal?: AbortSignal,
+): Promise<ToolResult> {
+  const { model, effort } = subagentModel(parent.settings, request.subagent_type);
+  const ui = new SubagentUI(parent.ui, request.description);
+  const session: Session = {
+    ...parent.session,
+    model,
+    messages: [{ role: 'user', content: request.prompt }],
+    transcript: [],
+    usage: emptyUsage(),
+    api: {
+      system: await subagentPrompt(parent.settings.cwd, request.subagent_type),
+      effort,
+      tools: request.subagent_type === 'explore' ? EXPLORE_TOOLS : GENERAL_TOOLS,
+    },
+    contextTokens: undefined,
+    peakContextTokens: undefined,
+    compactions: undefined,
+    todos: undefined,
+  };
+  const child: EngineContext = {
+    ...parent,
+    settings: { ...parent.settings, model, effort, maxTurns: SUBAGENT_TURNS },
+    session,
+    ui,
+    prompt: undefined,
+    exitPlan: undefined,
+    signal: signal ?? parent.signal,
+    budget: { remaining: SUBAGENT_TURNS },
+    // Usage still reaches the parent session and the meter through onUsage.
+    checkpoint: async () => {},
+  };
+  try {
+    await runAPI(child);
+  } catch (error) {
+    if (child.signal.aborted) throw error;
+    return {
+      content: `The subagent stopped before finishing: ${error instanceof Error ? error.message : String(error)}`,
+      is_error: true,
+    };
+  }
+  const report = lastAssistantText(session.messages) || 'The subagent finished without a report.';
+  return { content: `${report}\n\n[${ui.calls} tool call${ui.calls === 1 ? '' : 's'}]` };
+}
+
 export async function runAPI(ctx: EngineContext): Promise<void> {
   const { settings, session, ui, signal } = ctx;
   const mode = apiMode(settings);
   const client = apiClient(ctx.credential.secret, settings.baseUrl);
-  const runner = new ToolRunner({
-    cwd: settings.cwd,
-    approve: ctx.approve,
-    ui,
-    protectedPaths: settings.protectedPaths,
-    exitPlan:
-      ctx.exitPlan &&
-      (async (plan, abort) => {
-        const decision = await ctx.exitPlan!(plan, abort);
-        // The tool result already tells the model, so no separate announcement is needed.
-        if (decision.approved) {
-          if (session.api) session.api.planMode = decision.mode === 'plan';
-          if (decision.mode) settings.permissionMode = decision.mode;
-        }
-        return decision;
-      }),
-  });
   const latest = session.messages.at(-1);
   if (ctx.prompt && latest?.role === 'user' && latest.content === ctx.prompt) {
     const attachment = await attachMentions(ctx.prompt, {
@@ -431,6 +508,30 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
     await compactConversation(ctx, client, true);
   }
   await prepareConversation(ctx, mode);
+  const runner = new ToolRunner({
+    cwd: settings.cwd,
+    approve: ctx.approve,
+    ui,
+    protectedPaths: settings.protectedPaths,
+    allowedTools: session.api?.tools,
+    ...(session.api?.tools && !session.api.tools.includes('task')
+      ? {}
+      : { subagent: (request, abort) => runSubagent(ctx, request, abort) }),
+    onTodos: (items) => {
+      session.todos = items;
+    },
+    exitPlan:
+      ctx.exitPlan &&
+      (async (plan, abort) => {
+        const decision = await ctx.exitPlan!(plan, abort);
+        // The tool result already tells the model, so no separate announcement is needed.
+        if (decision.approved) {
+          if (session.api) session.api.planMode = decision.mode === 'plan';
+          if (decision.mode) settings.permissionMode = decision.mode;
+        }
+        return decision;
+      }),
+  });
   let cutoffs = 0;
   let malformed = 0;
   while (ctx.budget.remaining > 0) {
@@ -460,6 +561,8 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
             if (block.type === 'thinking' && block.thinking) {
               ui.progress('\n');
               progress += '\n';
+            } else if (block.type === 'server_tool_use') {
+              ui.tool(block.name, (block.input ?? {}) as Record<string, unknown>);
             } else if (block.type === 'fallback') {
               ui.notice(`${block.from.model} declined; ${block.to.model} continues.`);
             }

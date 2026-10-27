@@ -17,6 +17,8 @@ export interface ModelFeatures {
   /** On-demand server-side compaction. */
   compaction: boolean;
   fast: boolean;
+  /** Server-side web search and fetch with dynamic filtering. */
+  webTools: boolean;
 }
 
 const modern = {
@@ -29,6 +31,7 @@ const modern = {
   systemMessages: false,
   compaction: true,
   fast: false,
+  webTools: true,
 };
 
 // Capabilities checked 2026-10-27 against the Claude API model migration guide.
@@ -36,6 +39,8 @@ const known: Record<string, ModelFeatures> = {
   'claude-fable-5-1': {
     ...modern,
     label: 'Fable 5.1',
+    // Fable models take newer web tool versions than the ones ArnCode sends.
+    webTools: false,
     progressUpdates: true,
     fallbacks: true,
     messageEffort: true,
@@ -44,6 +49,7 @@ const known: Record<string, ModelFeatures> = {
   'claude-fable-5': {
     ...modern,
     label: 'Fable 5',
+    webTools: false,
     progressUpdates: true,
     fallbacks: true,
     systemMessages: true,
@@ -77,6 +83,7 @@ const known: Record<string, ModelFeatures> = {
   'claude-haiku-5-5': {
     ...modern,
     label: 'Haiku 5.5',
+    webTools: false,
     messageEffort: true,
     systemMessages: true,
   },
@@ -88,6 +95,7 @@ const known: Record<string, ModelFeatures> = {
     ...modern,
     label: 'Haiku 4.5',
     contextWindow: 200_000,
+    webTools: false,
     adaptive: false,
     xhigh: false,
     compaction: false,
@@ -113,6 +121,7 @@ export function modelFeatures(model: string): ModelFeatures {
       label: id.replace(/^claude-/, ''),
       contextWindow: 200_000,
       compaction: false,
+      webTools: false,
     }
   );
 }

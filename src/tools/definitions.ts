@@ -119,4 +119,45 @@ export const toolDefinitions: Tool[] = [
       required: ['plan'],
     },
   },
+  {
+    name: 'todo_write',
+    description:
+      'Keep a checklist for work with three or more steps. Send the complete list each time; mark one item in_progress before starting it and completed as soon as it is done. activeForm is the present-tense wording shown while an item runs, such as "Running the tests". Skip it for simple tasks.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              content: { type: 'string' },
+              status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+              activeForm: { type: 'string' },
+            },
+            required: ['content', 'status', 'activeForm'],
+          },
+        },
+      },
+      required: ['todos'],
+    },
+  },
+  {
+    name: 'task',
+    description:
+      'Hand a self-contained piece of work to a subagent that runs in its own context and returns only its final report. Use it for broad searches and investigations whose intermediate output you do not need, and start several in one response to run them in parallel. explore is read-only and quick; general can also edit files and run commands. The subagent cannot see this conversation: give it complete instructions and say what to report back.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'Three to five words.' },
+        prompt: { type: 'string' },
+        subagent_type: {
+          type: 'string',
+          enum: ['explore', 'general'],
+          description: 'Default explore.',
+        },
+      },
+      required: ['description', 'prompt'],
+    },
+  },
 ];
