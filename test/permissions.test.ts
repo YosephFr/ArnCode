@@ -54,3 +54,38 @@ describe('permissions', () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 });
+
+describe('edit and plan modes', () => {
+  it('auto-approves file edits in edits mode but still asks for shell commands', async () => {
+    const prompt = vi.fn(async () => 'n');
+    const permissions = new PermissionManager('edits', true, prompt, '/project');
+    expect(await permissions.approve('edit_file', { path: 'a.ts' })).toEqual({ allowed: true });
+    expect(await permissions.approve('Write', { file_path: '/project/b.ts' })).toEqual({
+      allowed: true,
+    });
+    expect((await permissions.approve('bash', { command: 'rm -rf build' })).allowed).toBe(false);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps plan mode read-only except plan files, and asks before shell commands', async () => {
+    const prompt = vi.fn(async () => 'always');
+    const permissions = new PermissionManager('plan', true, prompt, '/project');
+    expect(await permissions.approve('grep', { pattern: 'x' })).toEqual({ allowed: true });
+    expect(await permissions.approve('write_file', { path: '.arncode/plans/refactor.md' })).toEqual(
+      { allowed: true },
+    );
+    const denied = await permissions.approve('edit_file', { path: 'src/app.ts' });
+    expect(denied).toMatchObject({ allowed: false, reason: expect.stringContaining('read-only') });
+    expect(
+      (await permissions.approve('write_file', { path: '.arncode/plans/../../escape.md' })).allowed,
+    ).toBe(false);
+    expect((await permissions.approve('bash', { command: 'ls' })).allowed).toBe(true);
+    expect((await permissions.approve('bash', { command: 'ls' })).allowed).toBe(true);
+    expect(prompt).toHaveBeenCalledTimes(2);
+    const headless = new PermissionManager('plan', false, prompt, '/project');
+    expect(await headless.approve('bash', { command: 'ls' })).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('plan mode requires an interactive terminal'),
+    });
+  });
+});

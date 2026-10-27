@@ -3,14 +3,13 @@ import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import type { AgentUI, Approve } from '../types.js';
+import type { AgentUI, Approve, ExitPlan } from '../types.js';
 import { redact } from '../redact.js';
 import { editText, listDirectory, readImage, readText, truncate, writeText } from './files.js';
 import type { PreparedImage } from '../images.js';
 import { globFiles, grepFiles } from './search.js';
 import { runProcess } from './process.js';
 import { loadSkill } from '../skills.js';
-import { formatToolResult } from '../ui.js';
 import { createPathPolicy } from './paths.js';
 
 export { toolDefinitions } from './definitions.js';
@@ -18,6 +17,7 @@ export { toolDefinitions } from './definitions.js';
 const filePath = z.string().min(1).max(4096);
 const schemas = {
   skill: z.object({ name: z.string().min(1).max(64) }).strict(),
+  exit_plan_mode: z.object({ plan: z.string().min(1).max(200_000) }).strict(),
   read_file: z
     .object({
       path: filePath,
@@ -125,6 +125,7 @@ export class ToolRunner {
       approve: Approve;
       ui: AgentUI;
       protectedPaths?: readonly string[];
+      exitPlan?: ExitPlan;
     },
   ) {}
 
@@ -132,16 +133,10 @@ export class ToolRunner {
     const started = Date.now();
     try {
       const result = await this.execute(name, input, signal);
-      if (name === 'bash' || result.is_error) {
-        this.options.ui.notice(
-          formatToolResult(name, resultText(result), {
-            isError: result.is_error,
-            durationMs: Date.now() - started,
-          }),
-        );
-      } else if (typeof result.content !== 'string') {
-        this.options.ui.notice(resultText(result).split('\n')[0] ?? '');
-      }
+      this.options.ui.toolResult(name, resultText(result), {
+        isError: result.is_error,
+        durationMs: Date.now() - started,
+      });
       return result;
     } finally {
       this.options.ui.idle();
@@ -163,7 +158,7 @@ export class ToolRunner {
       const value = parsed.data;
       const cwd = await realpath(this.options.cwd);
       const policy =
-        tool === 'bash' || tool === 'skill'
+        tool === 'bash' || tool === 'skill' || tool === 'exit_plan_mode'
           ? undefined
           : await createPathPolicy(cwd, this.options.protectedPaths);
       this.options.ui.tool(name, value);
@@ -176,6 +171,27 @@ export class ToolRunner {
       this.options.ui.status(`Running ${name}`);
       let content: string;
       switch (tool) {
+        case 'exit_plan_mode': {
+          const { plan } = schemas.exit_plan_mode.parse(value);
+          if (!this.options.exitPlan) {
+            this.options.ui.text(`${plan.trimEnd()}\n`);
+            this.options.ui.endText();
+            return {
+              content:
+                'The plan was shown to the user, who will review it before anything changes. Stop here without making changes.',
+            };
+          }
+          const decision = await this.options.exitPlan(plan, signal);
+          if (!decision.approved)
+            return {
+              content: decision.feedback
+                ? `The user wants changes to the plan: ${decision.feedback}`
+                : 'The user did not approve the plan yet. Ask what should change, then present a revised plan.',
+            };
+          return {
+            content: `The user approved the plan${decision.mode && decision.mode !== 'plan' ? `; plan mode is off and ${decision.mode} permissions apply` : ''}. Carry it out now.`,
+          };
+        }
         case 'skill': {
           const skill = await loadSkill(cwd, schemas.skill.parse(value).name);
           return {

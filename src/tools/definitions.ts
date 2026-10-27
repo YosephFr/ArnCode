@@ -109,4 +109,14 @@ export const toolDefinitions: Tool[] = [
       'Load the full instructions for a skill by name. Use the available skills index to choose a relevant skill before starting its workflow. Relative references resolve from the returned base directory.',
     input_schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
   },
+  {
+    name: 'exit_plan_mode',
+    description:
+      'In plan mode, present the finished plan so the user can approve it before anything changes. Write it in Markdown: the goal, the files to change and how, and how the result will be verified. The result says whether to proceed or keep planning. Outside plan mode it does nothing.',
+    input_schema: {
+      type: 'object',
+      properties: { plan: { type: 'string', description: 'The complete plan in Markdown.' } },
+      required: ['plan'],
+    },
+  },
 ];

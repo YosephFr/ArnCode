@@ -1,6 +1,14 @@
 export type AuthMode = 'api-key' | 'oauth';
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export type PermissionMode = 'full' | 'ask';
+export type PermissionMode = 'full' | 'edits' | 'ask' | 'plan';
+
+/** The user's answer to a finished plan: approve it in a mode, or keep planning. */
+export interface PlanDecision {
+  approved: boolean;
+  mode?: PermissionMode;
+  feedback?: string;
+}
+export type ExitPlan = (plan: string, signal?: AbortSignal) => Promise<PlanDecision>;
 
 export interface Settings {
   cwd: string;
@@ -29,6 +37,11 @@ export interface AgentUI {
   /** Stream a progress note the model writes between tool calls. */
   progress(value: string): void;
   tool(name: string, input: Record<string, unknown>): void;
+  toolResult(
+    name: string,
+    output: string,
+    options?: { isError?: boolean; durationMs?: number },
+  ): void;
   diff(path: string, before: string, after: string): void;
 }
 

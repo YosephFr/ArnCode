@@ -11,6 +11,7 @@ import type {
   SDKResultSuccess,
 } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { formatToolResult } from '../src/ui.js';
 import { DEFAULTS } from '../src/config.js';
 import { oauthOptions, runOAuth, sdkUsage, usageDifference } from '../src/engines/oauth.js';
 import type { EngineContext } from '../src/engines/types.js';
@@ -69,16 +70,7 @@ async function context(overrides: Partial<Settings> = {}): Promise<EngineContext
       createdAt: '2026-10-26T00:00:00.000Z',
       source: 'stored',
     },
-    ui: {
-      text: vi.fn(),
-      endText: vi.fn(),
-      status: vi.fn(),
-      idle: vi.fn(),
-      notice: vi.fn(),
-      progress: vi.fn(),
-      tool: vi.fn(),
-      diff: vi.fn(),
-    },
+    ui: plainUI(),
     approve: vi.fn(async () => ({ allowed: true })),
     signal: new AbortController().signal,
     budget: { remaining: settings.maxTurns },
@@ -86,6 +78,25 @@ async function context(overrides: Partial<Settings> = {}): Promise<EngineContext
     checkpoint: vi.fn(async () => undefined),
     onRequest: vi.fn(async () => undefined),
     onUsage: vi.fn(async () => undefined),
+  };
+}
+
+function plainUI() {
+  const notice = vi.fn();
+  return {
+    text: vi.fn(),
+    endText: vi.fn(),
+    status: vi.fn(),
+    idle: vi.fn(),
+    notice,
+    progress: vi.fn(),
+    // Plain terminals print tool results as notices; keep that path observable.
+    toolResult: vi.fn(
+      (name: string, output: string, options?: { isError?: boolean; durationMs?: number }) =>
+        notice(formatToolResult(name, output, options)),
+    ),
+    tool: vi.fn(),
+    diff: vi.fn(),
   };
 }
 

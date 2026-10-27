@@ -4,6 +4,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolRunner } from '../src/tools/index.js';
+import { formatToolResult } from '../src/ui.js';
 import { createPathPolicy } from '../src/tools/paths.js';
 import type { AgentUI, Approve } from '../src/types.js';
 
@@ -13,13 +14,18 @@ let ui: AgentUI;
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(tmpdir(), 'arncode-tools-'));
+  const notice = vi.fn();
   ui = {
     text: vi.fn(),
     endText: vi.fn(),
     status: vi.fn(),
     idle: vi.fn(),
-    notice: vi.fn(),
+    notice,
     progress: vi.fn(),
+    // Plain terminals print tool results as notices; keep that path observable.
+    toolResult: vi.fn((name: string, output: string, options?: { isError?: boolean }) =>
+      notice(formatToolResult(name, output, options)),
+    ),
     tool: vi.fn(),
     diff: vi.fn(),
   };
@@ -367,6 +373,7 @@ describe('output budgets', () => {
           idle: () => {},
           notice: () => {},
           progress: () => {},
+          toolResult: () => {},
           tool: () => {},
           diff: () => {},
         },
@@ -381,5 +388,41 @@ describe('output budgets', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('plan approval', () => {
+  it('prints the plan when nobody can approve it, or reports the decision', async () => {
+    const shown: string[] = [];
+    const quietUI = {
+      ...ui,
+      text: (value: string) => {
+        shown.push(value);
+      },
+    };
+    const headless = new ToolRunner({
+      cwd: directory,
+      approve: async () => ({ allowed: true }),
+      ui: quietUI,
+    });
+    const printed = await headless.run('exit_plan_mode', { plan: '# Plan\n1. Fix it' });
+    expect(shown.join('')).toContain('# Plan');
+    expect(printed.content).toContain('Stop here');
+    const decisions = [
+      { approved: true, mode: 'edits' as const },
+      { approved: false, feedback: 'Use a migration instead.' },
+    ];
+    const interactive = new ToolRunner({
+      cwd: directory,
+      approve: async () => ({ allowed: true }),
+      ui,
+      exitPlan: async () => decisions.shift()!,
+    });
+    expect((await interactive.run('exit_plan_mode', { plan: 'x' })).content).toContain(
+      'approved the plan; plan mode is off and edits permissions apply',
+    );
+    expect((await interactive.run('exit_plan_mode', { plan: 'x' })).content).toContain(
+      'Use a migration instead.',
+    );
   });
 });

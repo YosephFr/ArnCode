@@ -25,7 +25,7 @@ describe('terminal output', () => {
     const output = capture();
     output.ui.status('Running bash');
     vi.advanceTimersByTime(30_000);
-    expect(output.stderr()).toBe('Running bash · 15s elapsed\nRunning bash · 30s elapsed\n');
+    expect(output.stderr()).toBe('Running Bash · 15s elapsed\nRunning Bash · 30s elapsed\n');
     output.ui.notice(formatToolResult('bash', 'Exit code: 0\nrender complete'));
     output.ui.text('Video ready.');
     output.ui.endText();

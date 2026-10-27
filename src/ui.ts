@@ -1,7 +1,10 @@
 import { stripVTControlCharacters } from 'node:util';
-import { createTwoFilesPatch } from 'diff';
+import { createTwoFilesPatch, structuredPatch } from 'diff';
 import pc from 'picocolors';
 import { redact, StreamingRedactor } from './redact.js';
+import type { InteractiveApp } from './tui/app.js';
+import { duration, fitWidth, padVisible, wrapText } from './tui/text.js';
+import { themeFor, type Theme } from './tui/theme.js';
 import type { AgentUI } from './types.js';
 
 export function terminalText(value: string): string {
@@ -54,8 +57,80 @@ export function formatToolResult(
     : header;
 }
 
+const DISPLAY_NAMES: Record<string, string> = {
+  read_file: 'Read',
+  write_file: 'Write',
+  edit_file: 'Edit',
+  list_dir: 'List',
+  glob: 'Glob',
+  grep: 'Search',
+  bash: 'Bash',
+  skill: 'Skill',
+};
+
+export function displayName(name: string): string {
+  const bare = name.replace(/^mcp__arncode__/, '');
+  return DISPLAY_NAMES[bare] ?? bare;
+}
+
+function plural(count: number, noun: string): string {
+  return `${count.toLocaleString('en-US')} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/** A short summary of a successful tool result for the interactive transcript. */
+export function resultLines(name: string, output: string): string[] {
+  const bare = name.replace(/^mcp__arncode__/, '');
+  const rows = output.split('\n').filter((line) => line && !/^\[.*\]$/.test(line));
+  switch (bare) {
+    case 'read_file':
+      if (output.startsWith('Image ')) return [output.split('\n')[0]!];
+      return [
+        output === '[Empty file]'
+          ? 'Empty file'
+          : plural(rows.filter((line) => /^\d+: /.test(line)).length, 'line'),
+      ];
+    case 'glob':
+    case 'Glob':
+      return [rows.length ? plural(rows.length, 'file') : 'No matching files'];
+    case 'grep':
+    case 'Grep':
+      return [rows.length ? plural(rows.length, 'match') : 'No matches'];
+    case 'list_dir':
+      return [plural(rows.length, 'entry').replace('entrys', 'entries')];
+    case 'skill':
+      return ['Loaded'];
+    case 'bash':
+    case 'Bash': {
+      const sections = /^([^\n]*)\nstdout:\n([\s\S]*?)\nstderr:\n([\s\S]*)$/.exec(output);
+      const status = sections?.[1] ?? '';
+      const text = sections
+        ? [sections[2], sections[3]].filter((part) => part && part !== '(empty)').join('\n')
+        : output;
+      const lines = text
+        .trimEnd()
+        .split('\n')
+        .filter((line) => line.trim());
+      const tail = lines.slice(-5);
+      return [
+        ...(lines.length > tail.length
+          ? [`… ${plural(lines.length - tail.length, 'more line')}`]
+          : []),
+        ...tail,
+        ...(status && status !== 'Exit code: 0' ? [status] : []),
+        ...(!lines.length && (!status || status === 'Exit code: 0') ? ['Done'] : []),
+      ];
+    }
+    default:
+      return [];
+  }
+}
+
 type TerminalOutput = NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
 
+/**
+ * Terminal output for the agent. With an interactive app attached, output scrolls above a live
+ * footer and gets a structured look; otherwise it is plain text suited to logs and pipes.
+ */
 export class TerminalUI implements AgentUI {
   private spinner?: ReturnType<typeof setInterval>;
   private spinnerVisible = false;
@@ -64,6 +139,10 @@ export class TerminalUI implements AgentUI {
   private endsWithNewline = true;
   private progressOpen = false;
   private readonly colors;
+  private app?: InteractiveApp;
+  private theme: Theme;
+  private line = '';
+  private progressLine = '';
 
   constructor(
     private readonly out: TerminalOutput = process.stdout,
@@ -72,36 +151,154 @@ export class TerminalUI implements AgentUI {
     this.colors = pc.createColors(
       Boolean(err.isTTY) && !process.env.NO_COLOR && process.env.TERM !== 'dumb',
     );
+    this.theme = themeFor(err);
+  }
+
+  attach(app: InteractiveApp, theme: Theme): void {
+    this.app = app;
+    this.theme = theme;
+  }
+
+  detach(): void {
+    this.endText();
+    this.app = undefined;
+  }
+
+  private get width(): number {
+    return this.app?.screen.width ?? Math.max(20, this.err.columns || 80);
+  }
+
+  /** Print lines above the footer, wrapped to the terminal. */
+  private emit(text: string, stream: 'ui' | 'content' = 'ui'): void {
+    if (!this.app) return;
+    const lines = text.split('\n').flatMap((line) => (line ? wrapText(line, this.width) : ['']));
+    this.app.print(`${lines.join('\n')}\n`, stream);
+  }
+
+  /** A proposed plan, shown in full before the user approves it. */
+  plan(text: string): void {
+    this.endText();
+    this.endProgress();
+    const clean = terminalText(redact(text)).trimEnd();
+    if (this.app) this.emit(`\n${this.theme.strong('Plan')}\n${clean}\n`);
+    else this.err.write(`Plan\n${clean}\n`);
+  }
+
+  /** Close a turn with its duration and cost, so the result of each request stays visible. */
+  turnEnd(milliseconds: number, cost: string, failed: boolean): void {
+    if (!this.app) return;
+    const mark = failed ? this.theme.error('✗') : this.theme.success('✓');
+    this.emit(
+      `${mark} ${this.theme.muted(`${duration(milliseconds)}${cost ? ` · ${cost}` : ''}`)}`,
+    );
+  }
+
+  /** Echo the submitted prompt into the transcript on a tinted band. */
+  user(text: string): void {
+    if (!this.app) return;
+    const clean = terminalText(redact(text));
+    const rows = clean.split('\n').flatMap((line) => wrapText(line, this.width - 2));
+    this.emit(
+      [
+        '',
+        ...rows.map((row, index) =>
+          this.theme.surface(
+            padVisible(fitWidth(`${index ? '  ' : '› '}${row}`, this.width), this.width),
+          ),
+        ),
+        '',
+      ].join('\n'),
+    );
   }
 
   text(value: string): void {
     this.idle();
     this.endProgress();
     const clean = terminalText(this.redactor.write(value));
-    if (clean) {
+    if (!clean) return;
+    if (!this.app) {
       this.out.write(clean);
       this.hasText = true;
       this.endsWithNewline = clean.endsWith('\n');
+      return;
     }
+    this.app.countTokens(Math.ceil(clean.length / 4));
+    const lines = (this.line + clean).split('\n');
+    this.line = lines.pop() ?? '';
+    if (lines.length) this.emit(lines.join('\n'), 'content');
+    this.app.setPreview(this.line ? wrapText(this.line, this.width) : []);
+    this.hasText = true;
   }
 
   endText(): void {
     const clean = terminalText(this.redactor.flush());
+    this.redactor = new StreamingRedactor();
+    if (this.app) {
+      const rest = this.line + clean;
+      this.line = '';
+      if (rest) this.emit(rest, 'content');
+      if (rest || this.hasText) this.app.setPreview([]);
+      this.hasText = false;
+      return;
+    }
     if (clean) {
       this.out.write(clean);
       this.hasText = true;
       this.endsWithNewline = clean.endsWith('\n');
     }
     if (this.hasText && !this.endsWithNewline) this.out.write('\n');
-    this.redactor = new StreamingRedactor();
     this.hasText = false;
     this.endsWithNewline = true;
   }
 
+  progress(value: string): void {
+    this.idle();
+    this.endText();
+    const clean = terminalText(redact(value));
+    if (!clean) return;
+    if (this.app) {
+      this.app.countTokens(Math.ceil(clean.length / 4));
+      const lines = (this.progressLine + clean).split('\n');
+      this.progressLine = lines.pop() ?? '';
+      for (const line of lines) if (line.trim()) this.emit(this.theme.muted(line));
+      this.app.setPreview(this.progressLine ? [this.theme.muted(this.progressLine)] : []);
+      return;
+    }
+    const lines = clean.split('\n');
+    lines.forEach((line, index) => {
+      if (index > 0) {
+        if (this.progressOpen) this.err.write('\n');
+        this.progressOpen = false;
+      }
+      if (!line) return;
+      this.err.write(this.colors.dim(line));
+      this.progressOpen = true;
+    });
+  }
+
+  private endProgress(): void {
+    if (this.app) {
+      if (this.progressLine.trim()) this.emit(this.theme.muted(this.progressLine));
+      if (this.progressLine) this.app.setPreview([]);
+      this.progressLine = '';
+      return;
+    }
+    if (!this.progressOpen) return;
+    this.err.write('\n');
+    this.progressOpen = false;
+  }
+
   status(value: string): void {
+    const label = terminalText(redact(value))
+      .replace(/\s+/g, ' ')
+      .replace(/\b(?:read_file|write_file|edit_file|list_dir|glob|grep|bash|skill)\b/g, displayName)
+      .slice(0, 160);
+    if (this.app) {
+      this.app.setBusy(label);
+      return;
+    }
     this.idle();
     const started = Date.now();
-    const label = terminalText(redact(value)).replace(/\s+/g, ' ').slice(0, 160);
     if (!this.err.isTTY || process.env.TERM === 'dumb') {
       this.spinner = setInterval(() => {
         this.err.write(`${label} · ${Math.floor((Date.now() - started) / 1000)}s elapsed\n`);
@@ -124,6 +321,7 @@ export class TerminalUI implements AgentUI {
     this.spinner.unref();
   }
 
+  /** Stop the plain-mode spinner. In the interactive app, the turn owner ends the working line. */
   idle(): void {
     if (!this.spinner) return;
     clearInterval(this.spinner);
@@ -132,47 +330,130 @@ export class TerminalUI implements AgentUI {
     this.spinnerVisible = false;
   }
 
-  progress(value: string): void {
-    this.idle();
-    this.endText();
-    const clean = terminalText(redact(value));
-    if (!clean) return;
-    const lines = clean.split('\n');
-    lines.forEach((line, index) => {
-      if (index > 0) {
-        if (this.progressOpen) this.err.write('\n');
-        this.progressOpen = false;
-      }
-      if (!line) return;
-      this.err.write(this.colors.dim(line));
-      this.progressOpen = true;
-    });
-  }
-
-  private endProgress(): void {
-    if (!this.progressOpen) return;
-    this.err.write('\n');
-    this.progressOpen = false;
-  }
-
   notice(value: string): void {
     this.idle();
     this.endText();
     this.endProgress();
-    this.err.write(`${terminalText(redact(value))}\n`);
+    const clean = terminalText(redact(value));
+    if (this.app) this.emit(this.theme.muted(clean));
+    else this.err.write(`${clean}\n`);
   }
 
   tool(name: string, input: Record<string, unknown>): void {
     this.idle();
     this.endText();
     this.endProgress();
-    this.err.write(`${this.colors.cyan(toolSummary(name, input))}\n`);
+    if (!this.app) {
+      this.err.write(`${this.colors.cyan(toolSummary(name, input))}\n`);
+      return;
+    }
+    const summary = toolSummary(displayName(name), input);
+    const [label = '', ...rest] = summary.split(' ');
+    this.emit(
+      fitWidth(
+        `${this.theme.accent('●')} ${this.theme.strong(label)}${rest.length ? ` ${this.theme.muted(rest.join(' '))}` : ''}`,
+        this.width,
+      ),
+    );
+  }
+
+  toolResult(
+    name: string,
+    output: string,
+    options: { isError?: boolean; durationMs?: number } = {},
+  ): void {
+    if (!this.app) {
+      // Plain output shows shell runs, failures and image reads; other results stay quiet.
+      if (name === 'bash' || name === 'Bash' || options.isError)
+        this.notice(formatToolResult(name, output, options));
+      else if (output.startsWith('Image ')) this.notice(output.split('\n')[0] ?? '');
+      return;
+    }
+    this.endText();
+    this.endProgress();
+    const seconds =
+      options.durationMs === undefined || options.durationMs < 1000
+        ? ''
+        : ` · ${(options.durationMs / 1000).toFixed(1)}s`;
+    const lines = options.isError
+      ? outputPreview(output, 12, 2000).split('\n')
+      : resultLines(name, terminalText(redact(output)));
+    if (!lines.length) return;
+    const style = options.isError ? this.theme.error : this.theme.muted;
+    this.emit(
+      lines
+        .map(
+          (line, index) =>
+            `${index ? '     ' : `  ${this.theme.muted('⎿')}  `}${style(line)}${index === lines.length - 1 ? this.theme.muted(seconds) : ''}`,
+        )
+        .join('\n'),
+    );
   }
 
   diff(file: string, before: string, after: string): void {
     this.idle();
     this.endText();
+    this.endProgress();
     if (before === after) return;
+    if (!this.app) {
+      this.plainDiff(file, before, after);
+      return;
+    }
+    const name = terminalText(redact(file));
+    if (!before) {
+      const lines = after.split('\n').length - (after.endsWith('\n') ? 1 : 0);
+      this.emit(
+        `  ${this.theme.muted('⎿')}  Created ${name} ${this.theme.muted(`· ${lines.toLocaleString()} lines`)}`,
+      );
+      return;
+    }
+    if (before.length + after.length > 400_000) {
+      this.emit(
+        `  ${this.theme.muted('⎿')}  Updated ${name} ${this.theme.muted('· large file, diff omitted')}`,
+      );
+      return;
+    }
+    const patch = structuredPatch(file, file, redact(before), redact(after), '', '', {
+      context: 2,
+    });
+    let added = 0;
+    let removed = 0;
+    const rows: string[] = [];
+    const width = this.width;
+    for (const hunk of patch.hunks) {
+      if (rows.length) rows.push(this.theme.muted('     …'));
+      let oldLine = hunk.oldStart;
+      let newLine = hunk.newStart;
+      for (const raw of hunk.lines) {
+        if (raw.startsWith('\\')) continue;
+        const sign = raw[0];
+        const text = terminalText(raw.slice(1));
+        const number = String(sign === '-' ? oldLine : newLine).padStart(5);
+        if (sign === '+') {
+          added++;
+          newLine++;
+          rows.push(this.theme.added(padVisible(fitWidth(`${number} + ${text}`, width), width)));
+        } else if (sign === '-') {
+          removed++;
+          oldLine++;
+          rows.push(this.theme.removed(padVisible(fitWidth(`${number} - ${text}`, width), width)));
+        } else {
+          oldLine++;
+          newLine++;
+          rows.push(this.theme.muted(fitWidth(`${number}   ${text}`, width)));
+        }
+      }
+    }
+    const shown =
+      rows.length > 40
+        ? [...rows.slice(0, 40), this.theme.muted(`     … ${rows.length - 40} more lines`)]
+        : rows;
+    this.app.print(
+      `  ${this.theme.muted('⎿')}  Updated ${name} ${this.theme.success(`+${added}`)} ${this.theme.error(`-${removed}`)}\n${shown.join('\n')}\n`,
+    );
+  }
+
+  private plainDiff(file: string, before: string, after: string): void {
     if (!before) {
       const lines = after.split('\n').length - (after.endsWith('\n') ? 1 : 0);
       this.notice(

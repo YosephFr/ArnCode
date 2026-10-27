@@ -14,7 +14,7 @@ import {
   type Session,
 } from './session.js';
 import { addUsage, emptyUsage, type UsageTotals } from './usage.js';
-import type { AgentUI, Approve, Settings } from './types.js';
+import type { AgentUI, Approve, ExitPlan, Settings } from './types.js';
 import { redact } from './redact.js';
 
 interface RunOptions {
@@ -23,6 +23,8 @@ interface RunOptions {
   prompt: string;
   ui: AgentUI;
   approve: Approve;
+  exitPlan?: ExitPlan;
+  onRateLimit?: (info: unknown) => void;
   signal: AbortSignal;
   candidates?: Credential[];
   meter?: MeterStore;
@@ -66,6 +68,7 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
     if (budget.remaining <= 0)
       throw new Error(`Reached --max-turns (${settings.maxTurns}). Use --continue to resume.`);
     const changedEngine = session.engine !== credential.type;
+    const previousCredential = session.credential;
     switchEngine(session, credential.type);
     session.credential = credential.name;
     const ctx: EngineContext = {
@@ -75,12 +78,14 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
       prompt: userPrompt,
       ui,
       approve: options.approve,
+      exitPlan: options.exitPlan,
       signal,
       budget,
       canFailover: !settings.pinnedCredential && candidates.length > 1,
       checkpoint: () => save(session),
       onRequest: (count) => meter.request(credential, count),
       onRetryError: (error) => meter.retry(credential, error),
+      onRateLimit: options.onRateLimit,
       onUsage: async (usage) => {
         turnUsage = addUsage(turnUsage, usage);
         session.usage = addUsage(session.usage, usage);
@@ -88,7 +93,9 @@ export async function runTask(options: RunOptions): Promise<UsageTotals> {
         await save(session);
       },
     };
-    ui.notice(`${credential.name} · ${credential.type} · ${settings.model}`);
+    // The status bar names the active credential; mention it here only when it changes.
+    if (tried > 0 || (previousCredential && previousCredential !== credential.name))
+      ui.notice(`Using ${credential.name} (${credential.type}).`);
     try {
       if (credential.type === 'api-key') await engines['api-key'](ctx);
       else {

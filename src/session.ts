@@ -20,6 +20,8 @@ export interface ApiConversation {
   effort: Effort;
   /** Effort applied later through effort-only system messages. */
   messageEffort?: Effort;
+  /** Whether the model was last told that plan mode is on. */
+  planMode?: boolean;
 }
 
 export interface Session {

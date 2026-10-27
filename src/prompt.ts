@@ -27,6 +27,12 @@ async function instruction(file: string): Promise<string> {
   }
 }
 
+export function planModeReminder(nativeTools = false): string {
+  return `Plan mode is on. Explore with read-only tools and ask the user when something is unclear. Do not change files or run commands that change state; you may write the plan under .arncode/plans/. When the plan is complete, call ${nativeTools ? 'mcp__arncode__exit_plan_mode' : 'exit_plan_mode'} with it.`;
+}
+
+export const PLAN_MODE_OFF = 'Plan mode is off. You may change files and run commands again.';
+
 export async function systemPrompt(cwd: string, nativeTools = false): Promise<string> {
   const locations = [
     ['Global instructions', path.join(getConfigDir(), 'AGENTS.md')],

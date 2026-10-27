@@ -1,7 +1,7 @@
 import type { Credential } from '../auth.js';
 import type { Session } from '../session.js';
 import type { UsageTotals } from '../usage.js';
-import type { AgentUI, Approve, Settings } from '../types.js';
+import type { AgentUI, Approve, ExitPlan, Settings } from '../types.js';
 
 export interface EngineContext {
   settings: Settings;
@@ -11,6 +11,8 @@ export interface EngineContext {
   prompt?: string;
   ui: AgentUI;
   approve: Approve;
+  /** Ask the user to approve a finished plan; absent when nobody can answer. */
+  exitPlan?: ExitPlan;
   signal: AbortSignal;
   budget: { remaining: number };
   canFailover: boolean;
@@ -18,4 +20,6 @@ export interface EngineContext {
   onUsage(usage: UsageTotals): Promise<void>;
   onRequest(count?: number): Promise<void>;
   onRetryError?(error: unknown): Promise<void>;
+  /** Subscription rate-limit details reported during an OAuth run. */
+  onRateLimit?(info: unknown): void;
 }

@@ -18,6 +18,8 @@
 | `--max-turns <n>`                          | Maximum agent turns per task; default: `80`                                 |
 | `-c, --continue`                           | Resume the newest session for the selected directory                        |
 | `-r, --resume <id>`                        | Resume a saved session; current directory or `--cwd` must match its project |
+| `--permission-mode <mode>`                 | `full` (default), `edits`, `ask`, or `plan`                                 |
+| `--plan`                                   | Start in plan mode                                                          |
 | `--safe`, `--ask`                          | Ask before writes, edits, and shell commands                                |
 | `--yolo`, `--dangerously-skip-permissions` | Select the default full-access mode                                         |
 | `--help`, `--version`                      | Show usage or version                                                       |
@@ -45,7 +47,8 @@ Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt
 | `/help`           | Show commands                                                  |
 | `/model [id]`     | Show or change the model; `/model list` lists available models |
 | `/auth [type]`    | Show or select `api-key`, `oauth`, or `auto`                   |
-| `/mode [mode]`    | Show or select `full` or `ask`                                 |
+| `/mode [mode]`    | Show or select `full`, `edits`, `ask`, or `plan`               |
+| `/plan`           | Switch to plan mode                                            |
 | `/fast [on/off]`  | Toggle fast mode, or set `on` / `off`                          |
 | `/effort [level]` | Show or change effort                                          |
 | `/clear`          | Start a fresh conversation                                     |
@@ -54,7 +57,24 @@ Cache reuse depends on an unchanged prefix, the model's minimum cacheable prompt
 | `/usage`          | Show usage by credential                                       |
 | `/exit`           | Leave the session                                              |
 
-`/mode yolo` and `/mode default` select full access; `/mode safe` selects ask mode. Changing mode clears remembered `always` approvals. In ask mode without an interactive terminal, actions requiring approval are denied immediately with an explanation.
+`/mode yolo` and `/mode default` select full access; `/mode safe` selects ask mode. Changing mode clears remembered session approvals. Without an interactive terminal, actions requiring approval are denied immediately with an explanation.
+
+In plan mode, read-only tools run, file writes are limited to `.arncode/plans/`, and shell commands need approval. The agent presents its plan with `exit_plan_mode`; approving it chooses the mode for the work. Without a terminal, the plan is printed and the run stops.
+
+### Keys
+
+| Key                            | Action                                                              |
+| ------------------------------ | ------------------------------------------------------------------- |
+| Enter                          | Send; while the agent works, queue the message for the next turn    |
+| Alt+Enter, Ctrl+J, `\` + Enter | New line                                                            |
+| Esc                            | Interrupt the running turn                                          |
+| Ctrl+C                         | Interrupt, or clear the input; press twice on an empty line to exit |
+| Shift+Tab                      | Cycle permission modes                                              |
+| Tab                            | Complete a command or an `@` file mention                           |
+| Up, Down                       | Browse prompt history for this project                              |
+| Ctrl+L                         | Clear the screen                                                    |
+
+Large pastes are collapsed to one line in the input and sent in full.
 
 ## Credential commands
 

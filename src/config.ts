@@ -40,7 +40,7 @@ const userConfigSchema = z
     maxTokens: z.number().int().min(1).max(128000).optional(),
     maxTurns: z.number().int().min(1).max(1000).optional(),
     compactAt: z.number().int().min(20_000).max(10_000_000).optional(),
-    permissionMode: z.enum(['full', 'ask']).optional(),
+    permissionMode: z.enum(['full', 'edits', 'ask', 'plan']).optional(),
     protectedPaths: z
       .array(
         z

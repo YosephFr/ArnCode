@@ -16,7 +16,7 @@ import { hydrateMessages, referencedBytes, storeBlob } from '../blobs.js';
 import { classifyCredentialFailure } from '../failures.js';
 import { modelEffort, modelFeatures } from '../models.js';
 import { appendTranscript, apiContext, type Session } from '../session.js';
-import { systemPrompt } from '../prompt.js';
+import { PLAN_MODE_OFF, planModeReminder, systemPrompt } from '../prompt.js';
 import {
   ToolRunner,
   isParallelSafe,
@@ -250,25 +250,48 @@ async function recordUsage(ctx: EngineContext, message: BetaMessage): Promise<vo
   await ctx.onUsage(usage);
 }
 
-/** Freeze the request prefix for a new conversation and apply effort changes cache-safely. */
+/** Tell the model about a change that takes effect with the prompt it is about to read. */
+function announce(session: Session, text: string, systemMessages: boolean): void {
+  const last = session.messages.at(-1);
+  if (!last || last.role !== 'user') return;
+  if (systemMessages) {
+    // A text system message must follow a user message and come last or before an assistant turn.
+    session.messages.push({ role: 'system', content: text });
+    return;
+  }
+  const reminder = { type: 'text' as const, text: `<system-reminder>${text}</system-reminder>` };
+  last.content =
+    typeof last.content === 'string'
+      ? [{ type: 'text', text: last.content }, reminder]
+      : [...(last.content as BetaContentBlockParam[]), reminder];
+}
+
+/** Freeze the request prefix for a new conversation and apply mode and effort changes. */
 async function prepareConversation(ctx: EngineContext, mode: ApiMode): Promise<void> {
   const { settings, session } = ctx;
+  const features = modelFeatures(settings.model);
   const effort = modelEffort(settings.model, settings.effort);
   if (!session.api) {
     session.api = { system: await systemPrompt(settings.cwd), effort };
-    return;
+  } else if ((session.api.messageEffort ?? session.api.effort) !== effort) {
+    const last = session.messages.at(-1);
+    if (mode === 'full' && features.messageEffort && last?.role === 'user') {
+      // An effort-only system message changes effort without restarting the prompt cache.
+      session.messages.splice(-1, 0, { role: 'system', content: [], output_config: { effort } });
+      session.api.messageEffort = effort;
+    } else {
+      session.api.effort = effort;
+      delete session.api.messageEffort;
+    }
   }
-  const current = session.api.messageEffort ?? session.api.effort;
-  if (current === effort) return;
-  const features = modelFeatures(settings.model);
-  const last = session.messages.at(-1);
-  if (mode === 'full' && features.messageEffort && last?.role === 'user') {
-    // An effort-only system message changes effort without restarting the prompt cache.
-    session.messages.splice(-1, 0, { role: 'system', content: [], output_config: { effort } });
-    session.api.messageEffort = effort;
-  } else {
-    session.api.effort = effort;
-    delete session.api.messageEffort;
+  const planning = settings.permissionMode === 'plan';
+  if (Boolean(session.api.planMode) !== planning) {
+    announce(
+      session,
+      planning ? planModeReminder() : PLAN_MODE_OFF,
+      mode === 'full' && features.systemMessages,
+    );
+    session.api.planMode = planning;
   }
 }
 
@@ -373,6 +396,17 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
     approve: ctx.approve,
     ui,
     protectedPaths: settings.protectedPaths,
+    exitPlan:
+      ctx.exitPlan &&
+      (async (plan, abort) => {
+        const decision = await ctx.exitPlan!(plan, abort);
+        // The tool result already tells the model, so no separate announcement is needed.
+        if (decision.approved) {
+          if (session.api) session.api.planMode = decision.mode === 'plan';
+          if (decision.mode) settings.permissionMode = decision.mode;
+        }
+        return decision;
+      }),
   });
   const latest = session.messages.at(-1);
   if (ctx.prompt && latest?.role === 'user' && latest.content === ctx.prompt) {

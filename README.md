@@ -76,7 +76,7 @@ arncode -p < task.txt
 arncode --model claude-haiku-5-5 --effort low -p "List the entry points"
 ```
 
-Assistant text goes to stdout; progress, tools, diffs, and usage go to stderr. Piped input works without a TTY. In interactive sessions, `/help`, `/model`, `/auth`, `/mode`, `/fast`, `/effort`, `/clear`, `/cost`, `/creds`, `/usage`, and `/exit` control the session.
+Assistant text goes to stdout; progress, tools, diffs, and usage go to stderr. Piped input works without a TTY. In interactive sessions, a status bar shows the model, effort, mode, context use, plan usage, credential, and cost. You can type the next request while the agent works; Esc interrupts it. `/help`, `/model`, `/effort`, `/mode`, `/plan`, `/fast`, `/auth`, `/clear`, `/cost`, `/creds`, `/usage`, and `/exit` control the session; Tab completes commands and `@` file mentions.
 
 Both modes can look at images. Reading a PNG, JPEG, GIF, or WebP file (a screenshot or a rendered frame) shows it to the model, and `@path` mentions or pasted image paths in a prompt attach the file directly. Large images are downscaled before they are sent.
 
@@ -84,9 +84,15 @@ The default model is `claude-opus-5-5`, with adaptive thinking and medium effort
 
 ## Full access and optional approvals
 
-The default `full` mode runs tools without prompts. Use `arncode --safe`, `arncode --ask`, or `/mode ask` to approve file writes, edits, and shell commands. In ask mode, `y` allows one call, `n` denies it, and `always` allows that tool for the current process. Without a terminal, actions requiring approval are denied immediately.
+The default `full` mode runs tools without prompts. Three other modes ask first:
 
-`--yolo` and `--dangerously-skip-permissions` remain accepted aliases for full mode. Set `"permissionMode": "ask"` in configuration to make approvals your preference.
+- `edits` applies file edits automatically and asks before shell commands.
+- `ask` (`--safe`, `--ask`) asks before every write, edit, and shell command.
+- `plan` (`--plan`) keeps the project read-only while the agent explores and proposes a plan; shell commands need approval. When you approve the plan, you choose the mode it continues in.
+
+Press Shift+Tab to cycle modes, or use `--permission-mode <mode>` and `/mode <mode>`. Approvals offer once, for the rest of the session, or no. Without a terminal, actions requiring approval are denied immediately.
+
+`--yolo` and `--dangerously-skip-permissions` remain accepted aliases for full mode. Set `"permissionMode"` in configuration to make another mode your preference.
 
 Shell commands have your account's filesystem and network access. Approval prompts are not a sandbox. API file tools stay within the selected project; shell commands can reach beyond it. API shell processes have bounded output and timeouts, and their managed process groups are stopped on completion or cancellation. OAuth uses the SDK's native tools with the same selected permission mode.
 

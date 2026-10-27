@@ -9,14 +9,13 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { buildOAuthEnv } from '../auth.js';
 import { appendTranscript, portableContext } from '../session.js';
-import { systemPrompt } from '../prompt.js';
+import { planModeReminder, systemPrompt } from '../prompt.js';
 import { emptyUsage, type UsageTotals } from '../usage.js';
 import { createPathPolicy, projectPath } from '../tools/paths.js';
 import { ToolRunner, resultText, toolSchemas } from '../tools/index.js';
 import { discoverSkills, loadSkill } from '../skills.js';
 import { z } from 'zod';
 import { redact, StreamingRedactor } from '../redact.js';
-import { formatToolResult } from '../ui.js';
 import type { Approval } from '../types.js';
 import type { EngineContext } from './types.js';
 import { OAuthUsageTracker } from './oauth-usage.js';
@@ -181,15 +180,10 @@ export async function oauthOptions(
       if (!isError && response.backgroundTaskId) {
         ctx.ui.notice('Bash is running in the background.');
       } else {
-        ctx.ui.notice(
-          formatToolResult(
-            input.tool_name.replace(/^mcp__arncode__/, ''),
-            input.tool_name === 'Bash' ? bashOutput(output) : (text ?? ''),
-            {
-              isError,
-              durationMs: start === undefined ? undefined : Date.now() - start.at,
-            },
-          ),
+        ctx.ui.toolResult(
+          input.tool_name.replace(/^mcp__arncode__/, ''),
+          input.tool_name === 'Bash' ? bashOutput(output) : (text ?? ''),
+          { isError, durationMs: start === undefined ? undefined : Date.now() - start.at },
         );
       }
     }
@@ -228,14 +222,17 @@ export async function oauthOptions(
     cwd: ctx.settings.cwd,
     protectedPaths: ctx.settings.protectedPaths,
     approve: ctx.approve,
+    exitPlan: ctx.exitPlan,
     ui: {
-      text: quiet,
-      endText: quiet,
+      // A plan presented without an interactive approver is the run's output.
+      text: (value) => ctx.ui.text(value),
+      endText: () => ctx.ui.endText(),
       status: quiet,
       idle: quiet,
       notice: quiet,
       progress: quiet,
       tool: quiet,
+      toolResult: quiet,
       diff: quiet,
     },
   });
@@ -262,6 +259,15 @@ export async function oauthOptions(
           'Search project text while excluding protected paths.',
           toolSchemas.grep.shape,
           (args) => searchResult('grep', args),
+        ),
+        tool(
+          'exit_plan_mode',
+          'In plan mode, present the finished plan so the user can approve it before anything changes. Write it in Markdown: the goal, the files to change and how, and how the result will be verified. Outside plan mode it does nothing.',
+          { plan: z.string() },
+          async ({ plan }) => {
+            const result = await search.run('exit_plan_mode', { plan }, ctx.signal);
+            return { content: [{ type: 'text' as const, text: resultText(result) }] };
+          },
         ),
         ...(skills.length
           ? [
@@ -312,9 +318,10 @@ export async function oauthOptions(
     mcpServers,
     strictMcpConfig: true,
     tools: ['Read', 'Write', 'Edit', 'Bash'],
+    // ArnCode enforces edits, ask and plan modes itself through hooks and canUseTool.
     permissionMode: ctx.settings.permissionMode === 'full' ? 'bypassPermissions' : 'default',
     allowDangerouslySkipPermissions: ctx.settings.permissionMode === 'full',
-    ...(ctx.settings.permissionMode === 'ask'
+    ...(ctx.settings.permissionMode !== 'full'
       ? ({
           canUseTool: async (name, args, options) => {
             const decision =
@@ -383,8 +390,16 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
   let pendingText = '';
   let waitingToRetry = false;
   try {
-    stream = query({ prompt: prompt ?? portableContext(ctx.session), options });
+    const text = prompt ?? portableContext(ctx.session);
+    stream = query({
+      prompt:
+        ctx.settings.permissionMode === 'plan'
+          ? `<system-reminder>${planModeReminder(true)}</system-reminder>\n\n${text}`
+          : text,
+      options,
+    });
     for await (const message of stream) {
+      if (message.type === 'rate_limit_event') ctx.onRateLimit?.(message.rate_limit_info);
       if (message.type === 'system' && message.subtype === 'init') await ctx.checkpoint();
       if (message.type === 'stream_event') {
         await usage.observe(message);
@@ -457,12 +472,10 @@ export async function runOAuth(ctx: EngineContext, prompt?: string): Promise<voi
       ) {
         ctx.ui.notice('Background task started.');
       } else if (message.type === 'system' && message.subtype === 'task_notification') {
-        ctx.ui.notice(
-          formatToolResult('Background task', message.summary, {
-            isError: message.status !== 'completed',
-            durationMs: message.usage?.duration_ms,
-          }),
-        );
+        ctx.ui.toolResult('Background task', message.summary, {
+          isError: message.status !== 'completed',
+          durationMs: message.usage?.duration_ms,
+        });
       } else if (message.type === 'result') {
         gotResult = true;
         ctx.budget.remaining -= await usage.finish(message);

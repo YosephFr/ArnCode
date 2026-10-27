@@ -37,6 +37,7 @@ function ui(): AgentUI {
     idle: vi.fn(),
     notice: vi.fn(),
     progress: vi.fn(),
+    toolResult: vi.fn(),
     tool: vi.fn(),
     diff: vi.fn(),
   };

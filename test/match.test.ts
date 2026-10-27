@@ -27,6 +27,7 @@ const quiet = {
   idle: () => {},
   notice: () => {},
   progress: () => {},
+  toolResult: () => {},
   tool: () => {},
   diff: () => {},
 };
