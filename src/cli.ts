@@ -571,10 +571,17 @@ program.action(async (options: CliOptions) => {
       const trimmed = line.trim();
       if (trimmed.startsWith('/')) {
         let result;
+        // Esc cancels a command that runs a request instead of closing ArnCode.
+        const command = new AbortController();
+        active = command;
+        state.signal = command.signal;
         try {
           result = await slashCommand(trimmed, state);
         } catch (error) {
-          ui.notice(errorText(error));
+          ui.notice(command.signal.aborted ? 'Cancelled.' : errorText(error));
+        } finally {
+          if (active === command) active = undefined;
+          app.setBusy(undefined);
         }
         if (result === 'exit') break;
         app.render();

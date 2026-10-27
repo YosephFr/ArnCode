@@ -98,6 +98,8 @@ export interface ReplState {
   compact?: () => Promise<void>;
   resume?: () => Promise<void>;
   select?: <T>(question: string, choices: Choice<T>[], initial?: number) => Promise<T | undefined>;
+  /** Aborted when the user presses Esc while a command runs. */
+  signal?: AbortSignal;
 }
 
 export type SlashResult = 'exit' | 'handled' | { prompt: string };
@@ -174,7 +176,7 @@ export async function slashCommand(line: string, state: ReplState): Promise<Slas
         await enableCredential(name, !stored.enabled);
         ui.notice(`${name} is ${stored.enabled ? 'off' : 'on'}.`);
       } else if (action === 'test') {
-        await testCredential(name, ui);
+        await testCredential(name, ui, state.signal);
       } else if (action === 'remove') {
         const sure = await state.select(`Remove ${name}? Its stored token is deleted.`, [
           { label: 'Keep it', value: false },

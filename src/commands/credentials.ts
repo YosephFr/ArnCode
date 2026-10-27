@@ -197,7 +197,11 @@ export function credentialCommands(program: Command, ui: TerminalUI): void {
 }
 
 /** Make one tiny Haiku request with a credential to confirm that it works. */
-export async function testCredential(name: string, ui: TerminalUI): Promise<void> {
+export async function testCredential(
+  name: string,
+  ui: TerminalUI,
+  signal?: AbortSignal,
+): Promise<void> {
   const credential = (await loadCredentialCandidates({ pinnedCredential: name }))[0];
   if (!credential) throw new Error(`Credential '${name}' was not found.`);
   const settings = {
@@ -213,6 +217,7 @@ export async function testCredential(name: string, ui: TerminalUI): Promise<void
   const controller = new AbortController();
   const cancel = () => controller.abort();
   process.once('SIGINT', cancel);
+  signal?.addEventListener('abort', cancel, { once: true });
   try {
     const usage = await runTask({
       settings,
@@ -231,5 +236,6 @@ export async function testCredential(name: string, ui: TerminalUI): Promise<void
     ui.notice(`${name}: connected. ${formatUsage(usage)}`);
   } finally {
     process.off('SIGINT', cancel);
+    signal?.removeEventListener('abort', cancel);
   }
 }
