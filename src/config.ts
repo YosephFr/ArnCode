@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { loadCredentialCandidates } from './auth.js';
 import { hooksSchema } from './hooks.js';
 import { mcpServersSchema } from './mcp.js';
+import { resolveModel } from './models.js';
 import { atomicWriteJson, readJson, withFileLock } from './storage.js';
 import type { Settings } from './types.js';
 
@@ -130,8 +131,9 @@ export function resolveSettings(
   const settings = validateConfig({
     auth: explicitAuth ?? config.auth ?? DEFAULTS.auth,
     profile: pinnedCredential ?? config.profile,
-    model:
+    model: resolveModel(
       flags.model ?? env.ARNCODE_MODEL ?? env.ANTHROPIC_MODEL ?? config.model ?? DEFAULTS.model,
+    ),
     baseUrl: flags.baseUrl ?? env.ANTHROPIC_BASE_URL ?? config.baseUrl,
     effort: flags.effort ?? env.ARNCODE_EFFORT ?? config.effort ?? DEFAULTS.effort,
     fast:

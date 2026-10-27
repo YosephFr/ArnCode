@@ -33,6 +33,9 @@ describe('configuration', () => {
       await readConfig(dir),
     );
     expect(settings.protectedPaths).toEqual([...DEFAULT_PROTECTED_PATHS, 'private', 'extra']);
+    // Model aliases work wherever a model is set, not only in /model.
+    expect(resolveSettings({ model: 'haiku' }, {}).model).toBe('claude-haiku-5-5');
+    expect(resolveSettings({}, { ARNCODE_MODEL: 'Sonnet' }).model).toBe('claude-sonnet-5-5');
     expect(
       resolveSettings({ protectedPaths: [] }, {}, { protectedPaths: [] }).protectedPaths,
     ).toEqual(DEFAULT_PROTECTED_PATHS);
