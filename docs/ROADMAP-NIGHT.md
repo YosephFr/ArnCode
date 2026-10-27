@@ -48,17 +48,18 @@ Working backlog for the `overnight-2026-10-27` branch. Items are ordered by prio
 
 ## P4. Speed and token efficiency
 
-| ID  | Item                                                                                                  | Status |
-| --- | ----------------------------------------------------------------------------------------------------- | ------ |
-| 4.1 | Read-only tools and subagents in one turn run in parallel; mutating tools keep their order            | done   |
-| 4.2 | Append-only history (no client-side truncation); stable cached prefix; cache keep-alive on long tools | done   |
-| 4.3 | OAuth: one live SDK session per interactive conversation instead of a new process per prompt          | held   |
-| 4.4 | `Edit` tolerates whitespace and indentation drift before failing                                      | done   |
-| 4.5 | Faster startup through lazy imports                                                                   | done   |
-| 4.6 | Tool results within about 10k tokens; tail-weighted command output saved to a file when cut           | done   |
-| 4.7 | `-p --output-format json` and `stream-json` for scripts and the benchmark harness                     | done   |
+| ID  | Item                                                                                                      | Status |
+| --- | --------------------------------------------------------------------------------------------------------- | ------ |
+| 4.1 | Read-only tools and subagents in one turn run in parallel; mutating tools keep their order                | done   |
+| 4.2 | Append-only history (no client-side truncation); stable cached prefix; cache keep-alive on long tools     | done   |
+| 4.3 | OAuth follow-ups resume the SDK session (full history, cached prefix) instead of resending the transcript | done   |
+| 4.4 | `Edit` tolerates whitespace and indentation drift before failing                                          | done   |
+| 4.5 | Faster startup through lazy imports                                                                       | done   |
+| 4.6 | Tool results within about 10k tokens; tail-weighted command output saved to a file when cut               | done   |
+| 4.7 | `-p --output-format json` and `stream-json` for scripts and the benchmark harness                         | done   |
+| 4.8 | OAuth: start the SDK process before the next prompt (`prewarm`)                                           | held   |
 
-Notes: 4.3 is held; see D11. 4.5 loads the Messages SDK, Agent SDK, MCP client and image codecs on first use. `arncode --version` takes about 0.3 s against 0.08 s for bare Node; most of the rest is zod and the terminal libraries that every run needs, so the entry point was not restructured.
+Notes: 4.5 loads the Messages SDK, Agent SDK, MCP client and image codecs on first use. `arncode --version` takes about 0.3 s against 0.08 s for bare Node; most of the rest is zod and the terminal libraries that every run needs, so the entry point was not restructured. 4.8 is held; see D11.
 
 ## P5. Credential bank
 
@@ -87,6 +88,6 @@ Notes: 4.3 is held; see D11. 4.5 loads the Messages SDK, Agent SDK, MCP client a
 - **D8. Plan mode is enforced by the tools**, not only the prompt: read-only tools run, writes are limited to plan files, and shell commands need approval.
 - **D9. Hooks and MCP servers load from the user's configuration only.** Project files never run commands, so opening a repository cannot execute anything.
 - **D10. Read-only explorer subagents default to Claude Haiku 5.5 at low effort** on the official endpoint (`ARNCODE_EXPLORE_MODEL` overrides); general subagents use the session model.
-- **D11. OAuth keeps one SDK query per prompt.** A probe of the Agent SDK showed cumulative cost and usage totals across turns and no cache read on the second turn of a shared session, so a long-lived session would add complexity without a measured gain.
+- **D11. OAuth resumes the SDK session; the process still starts per prompt.** Measured on Claude Haiku 5.5: a resumed follow-up wrote 140 tokens to the cache and read 11.5k, where resending the transcript wrote about 2.7k and sent 2.3k uncached, and the gap grows with the conversation. The SDK reports totals across a resumed session, so each request is billed by difference, and a request without a final result drops the thread. SDK files live in `~/.arncode/claude`; `"oauthSessions": false` restores the transcript-only behavior. A trivial prompt takes about 2.8 s, of which about 1 s is the SDK process starting; `prewarm` is alpha and fixes hooks, MCP servers, the environment and the permission callback up front, all of which ArnCode binds to each request and credential, so it waits.
 - **D12. Web tools are on by default** in both modes, with `"webTools": false` to turn them off; Haiku and Fable skip the server tools they do not support.
 - **D13. Themes change at once and are saved.** `/theme` restyles the footer and new output; scrollback keeps the colors it was printed with.
