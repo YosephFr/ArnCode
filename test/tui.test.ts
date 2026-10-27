@@ -1,5 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { readStdin } from '../src/input.js';
 import { InteractiveApp } from '../src/tui/app.js';
 import { LineEditor, wrapCharacters } from '../src/tui/editor.js';
 import { Screen } from '../src/tui/screen.js';
@@ -169,5 +170,18 @@ describe('interactive app', () => {
     key('\u0003', 'c', { ctrl: true });
     expect(onExit).toHaveBeenCalledTimes(1);
     app.stop();
+  });
+});
+
+describe('piped input', () => {
+  it('reads piped text, and skips stdin that stays open without data when told to wait', async () => {
+    const piped = new PassThrough();
+    const reading = readStdin({ stream: piped, waitMs: 1000 });
+    piped.write('  first part,');
+    piped.end(' second part  ');
+    expect(await reading).toEqual({ text: 'first part, second part', skipped: false });
+    const idle = new PassThrough();
+    expect(await readStdin({ stream: idle, waitMs: 20 })).toEqual({ text: '', skipped: true });
+    idle.destroy();
   });
 });

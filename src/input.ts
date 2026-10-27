@@ -2,16 +2,54 @@ import { createInterface, emitKeypressEvents, type Interface, type Key } from 'n
 import { terminalText } from './ui.js';
 import { redact } from './redact.js';
 
-export async function readStdin(maxBytes = 2 * 1024 * 1024): Promise<string> {
-  let input = '';
-  let bytes = 0;
-  process.stdin.setEncoding('utf8');
-  for await (const chunk of process.stdin) {
-    bytes += Buffer.byteLength(String(chunk));
-    if (bytes > maxBytes) throw new Error(`Input exceeds ${maxBytes} bytes.`);
-    input += String(chunk);
-  }
-  return input.trim();
+/**
+ * Read piped input. With `waitMs`, stdin that stays open without sending anything (as under some
+ * editors, CI runners and agent harnesses) is skipped after that long instead of blocking forever.
+ */
+export async function readStdin(
+  options: { maxBytes?: number; waitMs?: number; stream?: NodeJS.ReadableStream } = {},
+): Promise<{ text: string; skipped: boolean }> {
+  const { maxBytes = 2 * 1024 * 1024, waitMs, stream = process.stdin } = options;
+  stream.setEncoding('utf8');
+  return new Promise((resolve, reject) => {
+    let input = '';
+    let bytes = 0;
+    const timer =
+      waitMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            cleanup();
+            stream.pause();
+            resolve({ text: '', skipped: true });
+          }, waitMs);
+    const onData = (chunk: string | Buffer) => {
+      clearTimeout(timer);
+      bytes += Buffer.byteLength(String(chunk));
+      if (bytes > maxBytes) {
+        cleanup();
+        reject(new Error(`Input exceeds ${maxBytes} bytes.`));
+        return;
+      }
+      input += String(chunk);
+    };
+    const onEnd = () => {
+      cleanup();
+      resolve({ text: input.trim(), skipped: false });
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      stream.off('data', onData);
+      stream.off('end', onEnd);
+      stream.off('error', onError);
+    };
+    stream.on('data', onData);
+    stream.on('end', onEnd);
+    stream.on('error', onError);
+  });
 }
 
 export class TerminalInput {
@@ -53,7 +91,7 @@ export class TerminalInput {
   }
 
   async secret(prompt = 'Token: '): Promise<string> {
-    if (!this.interactive) return readStdin(16384);
+    if (!this.interactive) return (await readStdin({ maxBytes: 16384 })).text;
     this.close();
     this.ended = false;
     process.stderr.write(prompt);

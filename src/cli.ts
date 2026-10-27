@@ -149,7 +149,14 @@ program.action(async (options: CliOptions) => {
   if (!(await stat(settings.cwd)).isDirectory()) throw new Error('--cwd must be a directory.');
   const input = new TerminalInput();
   const oneShot = options.print !== undefined || !input.interactive;
-  const piped = !process.stdin.isTTY ? await readStdin() : '';
+  let piped = '';
+  if (!process.stdin.isTTY) {
+    // A prompt on the command line makes stdin optional, so an idle pipe must not block the run.
+    const stdin = await readStdin(typeof options.print === 'string' ? { waitMs: 3000 } : {});
+    if (stdin.skipped)
+      ui.notice('No input arrived on stdin within 3 seconds, so the run continues without it.');
+    piped = stdin.text;
+  }
   const prompt = [typeof options.print === 'string' ? options.print : '', piped]
     .filter(Boolean)
     .join('\n\n');
