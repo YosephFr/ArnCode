@@ -160,6 +160,28 @@ describe('interactive app', () => {
     app.stop();
   });
 
+  it('asks overlapping questions one at a time and cancels the waiting ones too', async () => {
+    const { app, key } = setup();
+    const yesNo = [
+      { label: 'Yes', value: 'y', key: 'y' },
+      { label: 'No', value: 'n', key: 'n' },
+    ];
+    const first = app.select('Run a?', yesNo);
+    const second = app.select('Run b?', yesNo);
+    key('y', 'y');
+    expect(await first).toBe('y');
+    key('n', 'n');
+    expect(await second).toBe('n');
+    const controller = new AbortController();
+    const third = app.select('Run c?', yesNo, 0, controller.signal);
+    const fourth = app.select('Run d?', yesNo, 0, controller.signal);
+    controller.abort();
+    expect(await Promise.all([third, fourth])).toEqual([undefined, undefined]);
+    const pending = app.select('Run e?', yesNo);
+    app.stop();
+    expect(await pending).toBeUndefined();
+  });
+
   it('clears input on Ctrl+C and exits on a second press', () => {
     const { app, key, onExit } = setup();
     key('a', 'a');

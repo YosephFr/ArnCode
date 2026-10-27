@@ -39,7 +39,8 @@ export class InteractiveApp {
   private preview: string[] = [];
   private queue: string[] = [];
   private waiting?: (value: string | undefined) => void;
-  private menu?: { select: SelectMenu<unknown>; resolve: (value: unknown) => void };
+  /** Questions waiting for an answer; the first is on screen and the rest wait their turn. */
+  private menus: { select: SelectMenu<unknown>; resolve: (value: unknown) => void }[] = [];
   private hint?: { text: string; until: number };
   private exitArmed = 0;
   private suggestions?: { start: number; items: Suggestion[]; index: number };
@@ -85,6 +86,7 @@ export class InteractiveApp {
     stdin.pause();
     this.waiting?.(undefined);
     this.waiting = undefined;
+    for (const menu of this.menus.splice(0)) menu.resolve(undefined);
   }
 
   /** The next prompt: one typed ahead while busy, or the next one the user submits. */
@@ -160,24 +162,26 @@ export class InteractiveApp {
         },
       };
       const cancel = () => {
-        if (this.menu !== menu) return;
-        this.menu = undefined;
+        const index = this.menus.indexOf(menu);
+        if (index < 0) return;
+        this.menus.splice(index, 1);
         menu.resolve(undefined);
         this.render();
       };
       signal?.addEventListener('abort', cancel, { once: true });
-      this.menu = menu;
+      // Parallel tools can ask at once; questions queue so each one gets its own answer.
+      this.menus.push(menu);
       this.render();
     });
   }
 
   private onKey(input: string | undefined, key: Key): void {
-    if (this.menu) {
-      const result = this.menu.select.handle(input, key);
+    const menu = this.menus[0];
+    if (menu) {
+      const result = menu.select.handle(input, key);
       if (result.done) {
-        const { resolve } = this.menu;
-        this.menu = undefined;
-        resolve(result.value);
+        this.menus.shift();
+        menu.resolve(result.value);
       }
       this.render();
       return;
@@ -252,7 +256,7 @@ export class InteractiveApp {
     const width = this.screen.width;
     const lines: string[] = [...this.preview];
     // While a menu waits for an answer, the menu is the only thing that needs attention.
-    if (this.busy && !this.menu) {
+    if (this.busy && !this.menus.length) {
       const elapsed = duration(Date.now() - this.busy.since);
       const tokens = this.busy.tokens ? ` · ↓ ${compactNumber(this.busy.tokens)} tokens` : '';
       lines.push(
@@ -264,8 +268,8 @@ export class InteractiveApp {
     }
     lines.push('');
     let cursor: { row: number; column: number } | undefined;
-    if (this.menu) {
-      lines.push(...this.menu.select.render(width, theme));
+    if (this.menus.length) {
+      lines.push(...this.menus[0]!.select.render(width, theme));
     } else {
       const input = this.editor.render(width, theme, {
         placeholder: this.busy ? 'Queue a follow-up' : (this.options.placeholder ?? ''),
