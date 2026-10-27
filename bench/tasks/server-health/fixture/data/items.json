@@ -1,0 +1,6 @@
+[
+  { "id": "kettle", "name": "Steel Kettle", "quantity": 12 },
+  { "id": "teapot", "name": "Glass Teapot", "quantity": 0 },
+  { "id": "mug", "name": "Stoneware Mug", "quantity": 40 },
+  { "id": "scale", "name": "Coffee Scale", "quantity": 5 },
+]

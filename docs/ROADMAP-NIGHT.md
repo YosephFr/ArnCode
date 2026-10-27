@@ -80,17 +80,18 @@ Notes: 4.5 loads the Messages SDK, Agent SDK, MCP client and image codecs on fir
 
 An audit of the night's work found twelve defects, all fixed with regression tests (approval questions that could hang, attachments outside the project, a plan-mode symlink escape, JSON output that broke commands, model switches that invalidated history, OAuth subagent text in the reply, Esc closing the app, slow pipes, summary cache misses, session titles, `$` handling, history size). A design review proposed the next changes below.
 
-| ID  | Item                                                                                       | Status |
-| --- | ------------------------------------------------------------------------------------------ | ------ |
-| 7.1 | `/undo` restores the files the latest request changed                                      | done   |
-| 7.2 | Background commands in API-key sessions (`run_in_background`, `bash_output`, `kill_shell`) | done   |
-| 7.3 | Reads of up to 2,000 lines; search and `@` completion respect `.gitignore`                 | done   |
-| 7.4 | Environment block in API-key prompts; `CLAUDE.local.md` and `~/.claude/CLAUDE.md` fallback | done   |
-| 7.5 | Approval previews for edits; plans rendered as Markdown                                    | done   |
-| 7.6 | Permission rules for commands and paths, kept across sessions                              | done   |
-| 7.7 | First run: offer `claude setup-token` when Claude Code is installed                        | done   |
-| 7.8 | Project `.mcp.json` after a one-time trust prompt                                          | done   |
-| 7.9 | Larger benchmark tasks; a published comparison run                                         | todo   |
+| ID   | Item                                                                                       | Status |
+| ---- | ------------------------------------------------------------------------------------------ | ------ |
+| 7.1  | `/undo` restores the files the latest request changed                                      | done   |
+| 7.2  | Background commands in API-key sessions (`run_in_background`, `bash_output`, `kill_shell`) | done   |
+| 7.3  | Reads of up to 2,000 lines; search and `@` completion respect `.gitignore`                 | done   |
+| 7.4  | Environment block in API-key prompts; `CLAUDE.local.md` and `~/.claude/CLAUDE.md` fallback | done   |
+| 7.5  | Approval previews for edits; plans rendered as Markdown                                    | done   |
+| 7.6  | Permission rules for commands and paths, kept across sessions                              | done   |
+| 7.7  | First run: offer `claude setup-token` when Claude Code is installed                        | done   |
+| 7.8  | Project `.mcp.json` after a one-time trust prompt                                          | done   |
+| 7.9  | Larger benchmark tasks: a bug two modules away, a service to run, a multi-module rename    | done   |
+| 7.10 | A published comparison run against Claude Code, Codex and OpenCode                         | held   |
 
 ## Decisions
 
@@ -112,3 +113,4 @@ An audit of the night's work found twelve defects, all fixed with regression tes
 - **D16. stdin: shell pipes are read to the end; sockets get 3 seconds.** Harnesses that spawn ArnCode through Node leave stdin as a socket that may never close.
 - **D17. `~/.claude/CLAUDE.md` applies when `~/.arncode/AGENTS.md` does not exist**, as in OpenCode.
 - **D18. `/undo` covers write and edit tools for the last 20 requests**; changes made through shell commands are not tracked, as in Claude Code's rewind.
+- **D19. The comparison run waits for the owner.** It spends subscription quota on several accounts, so the harness, tasks and command are ready but the run is not started unasked.

@@ -1,0 +1,5 @@
+{
+  "prompt": "This service's /health endpoint answers 500. Start the server, reproduce the error with curl, fix the cause, and confirm /health returns 200 and /items lists the items in stock. Do not leave the server running.",
+  "timeoutSec": 900,
+  "check": ["node", "{task}/check.mjs"]
+}

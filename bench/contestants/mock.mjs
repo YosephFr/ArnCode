@@ -1,7 +1,7 @@
 // A deterministic stand-in for a coding agent, so the harness can be tested without a model. It
-// recognizes each task by its fixture, applies a known patch to fix-bug, implement-spec and
-// cli-flag, answers read-chart wrongly, and reports usage the way ArnCode does.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// recognizes each task by its fixture, applies a known patch to every task but read-chart,
+// answers read-chart wrongly, and reports usage the way ArnCode does.
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -96,6 +96,42 @@ if (existsSync(file('lib/stats.js'))) {
   writeFileSync(file('lib/count.js'), library + lines);
   writeFileSync(file('test/lines.test.js'), linesTest);
   console.log('Added --lines to tally with tests.');
+} else if (existsSync(file('lib/money.js'))) {
+  const source = readFileSync(file('lib/money.js'), 'utf8');
+  writeFileSync(
+    file('lib/money.js'),
+    source.replace('Math.floor((cents * percent) / 100)', 'roundHalfEven((cents * percent) / 100)'),
+  );
+  console.log('percentOf now rounds instead of truncating.');
+} else if (existsSync(file('data/items.json'))) {
+  const data = readFileSync(file('data/items.json'), 'utf8');
+  writeFileSync(file('data/items.json'), data.replace(/,(\s*\])/, '$1'));
+  console.log('Removed the trailing comma that broke data/items.json.');
+} else if (existsSync(file('lib/users.js'))) {
+  for (const dir of ['lib', 'test'])
+    for (const name of readdirSync(file(dir))) {
+      const target = file(path.join(dir, name));
+      const source = readFileSync(target, 'utf8');
+      if (name !== 'users.js') writeFileSync(target, source.replaceAll('getUserData', 'loadUser'));
+    }
+  const users = readFileSync(file('lib/users.js'), 'utf8').replace(
+    'export function getUserData(id)',
+    'export function loadUser(id)',
+  );
+  const alias = `
+let warned = false;
+
+/** @deprecated Use loadUser. */
+export function getUserData(id) {
+  if (!warned) {
+    warned = true;
+    console.warn('getUserData is deprecated; use loadUser.');
+  }
+  return loadUser(id);
+}
+`;
+  writeFileSync(file('lib/users.js'), users + alias);
+  console.log('Renamed getUserData to loadUser and kept a deprecated alias.');
 } else if (existsSync(file('chart.png'))) {
   writeFileSync(file('answer.txt'), 'KIWI\n');
   console.log('The tallest bar is KIWI.');

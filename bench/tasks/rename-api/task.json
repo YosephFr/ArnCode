@@ -1,0 +1,5 @@
+{
+  "prompt": "Rename the function getUserData to loadUser throughout this project, including the tests. Keep getUserData working for other packages as a deprecated alias that calls loadUser and warns once with console.warn, naming loadUser. Make sure the tests pass.",
+  "timeoutSec": 900,
+  "check": ["node", "{task}/check.mjs"]
+}

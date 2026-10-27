@@ -56,18 +56,21 @@ The report shows, per task and contestant, the pass rate, median and nearest-ran
 
 ## Tasks
 
-| Task             | The agent must                                                     | The check                                                                                        |
-| ---------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `fix-bug`        | Fix the library bug behind a failing `node --test` suite           | The suite is unchanged and passes, and hidden tests confirm the fix is general                   |
-| `implement-spec` | Implement `expandRanges` from `SPEC.md`                            | Hidden tests, one per rule                                                                       |
-| `cli-flag`       | Add `--lines`/`-l` to a tiny CLI, with tests                       | The flag works on unseen files, the suite passes, and it fails once the original CLI is restored |
-| `read-chart`     | Read `chart.png` and write the tallest bar's label to `answer.txt` | Exact label, so it shows whether the agent can see images                                        |
+| Task             | The agent must                                                      | The check                                                                                        |
+| ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `fix-bug`        | Fix the library bug behind a failing `node --test` suite            | The suite is unchanged and passes, and hidden tests confirm the fix is general                   |
+| `implement-spec` | Implement `expandRanges` from `SPEC.md`                             | Hidden tests, one per rule                                                                       |
+| `cli-flag`       | Add `--lines`/`-l` to a tiny CLI, with tests                        | The flag works on unseen files, the suite passes, and it fails once the original CLI is restored |
+| `read-chart`     | Read `chart.png` and write the tallest bar's label to `answer.txt`  | Exact label, so it shows whether the agent can see images                                        |
+| `deep-bug`       | Find why invoice totals are a cent short in a 1,900-line project    | The suite is unchanged and passes, and hidden tests confirm the shared money helper was fixed    |
+| `server-health`  | Run a small HTTP service, reproduce a 500 on `/health` and fix it   | The check starts the service on a free port: `/health` answers 200 and `/items` lists the stock  |
+| `rename-api`     | Rename a function used by eight modules, keeping a deprecated alias | No caller uses the old name, the suite passes, and hidden tests check the alias warns once       |
 
 `tasks/read-chart/make-chart.mjs` draws the chart with `pngjs`; it holds the answer, so it stays outside the fixture. Run it to rewrite `chart.png`, or with `--check` to confirm the committed image matches.
 
 ### Add a task
 
-1. Create `tasks/<id>/fixture/` with the starting files. Keep it tiny; it becomes the agent's whole project.
+1. Create `tasks/<id>/fixture/` with the starting files; it becomes the agent's whole project. Small fixtures isolate one skill; larger ones show how an agent searches and reads.
 2. Add `tasks/<id>/task.json`:
 
    ```json

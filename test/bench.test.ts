@@ -69,9 +69,12 @@ describe('benchmark harness', () => {
     const byTask = Object.fromEntries(rows.map((row) => [row.task, row]));
     expect(Object.keys(byTask).sort()).toEqual([
       'cli-flag',
+      'deep-bug',
       'fix-bug',
       'implement-spec',
       'read-chart',
+      'rename-api',
+      'server-health',
     ]);
     for (const row of rows) {
       expect(row).toMatchObject({
@@ -103,13 +106,28 @@ describe('benchmark harness', () => {
     expect(byTask['read-chart']?.check.detail).toBe(
       'answer.txt says "KIWI"; the tallest bar is LIME',
     );
+    expect(byTask['deep-bug']?.check.detail).toBe('5 visible and 4 hidden tests pass');
+    expect(byTask['rename-api']?.check.detail).toBe(
+      '8 modules renamed; 2 visible and 2 hidden tests pass',
+    );
+    expect(byTask['server-health']?.check.detail).toBe(
+      '/health answers 200 and /items lists the 3 items in stock',
+    );
     expect(await readFile(path.join(dir, 'logs/fix-bug.mock.1.diff'), 'utf8')).toContain(
       '+  return [...values].sort((a, b) => a - b);',
     );
     expect(JSON.parse(await readFile(path.join(dir, 'meta.json'), 'utf8'))).toMatchObject({
       node: process.version,
       versions: { mock: 'mock 1.0.0' },
-      tasks: ['cli-flag', 'fix-bug', 'implement-spec', 'read-chart'],
+      tasks: [
+        'cli-flag',
+        'deep-bug',
+        'fix-bug',
+        'implement-spec',
+        'read-chart',
+        'rename-api',
+        'server-health',
+      ],
     });
 
     const markdown = await readFile(path.join(dir, 'report.md'), 'utf8');
@@ -120,7 +138,7 @@ describe('benchmark harness', () => {
     expect(markdown).toContain('| implement-spec | mock | 1/1 (100%) |');
     expect(markdown).toContain('| read-chart | mock | 0/1 (0%) |');
     expect(markdown).toMatch(
-      /^\| mock \| mock 1\.0\.0 \| 3\/4 \(75%\) \| .+ \| 0\.0123 \| 0\.0492 \|$/m,
+      /^\| mock \| mock 1\.0\.0 \| 6\/7 \(86%\) \| .+ \| 0\.0123 \| 0\.0861 \|$/m,
     );
     expect(run.stdout).toContain(markdown);
 
@@ -129,13 +147,13 @@ describe('benchmark harness', () => {
     expect(report.stdout).toBe(markdown);
     const json = JSON.parse(await readFile(path.join(dir, 'report.json'), 'utf8')) as Report;
     expect(json.contestants).toEqual([
-      expect.objectContaining({ contestant: 'mock', runs: 4, passes: 3, passRate: 0.75 }),
+      expect.objectContaining({ contestant: 'mock', runs: 7, passes: 6, passRate: 6 / 7 }),
     ]);
     expect(json.cells.find((cell) => cell.task === 'read-chart')?.usage.costUsd).toEqual({
       mean: 0.0123,
       reported: 1,
     });
-  }, 30_000);
+  }, 60_000);
 
   it('rejects every untouched fixture and keeps the chart in step with its generator', async () => {
     const tasks = path.join(repository, 'bench/tasks');

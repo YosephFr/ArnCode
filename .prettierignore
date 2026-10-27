@@ -3,3 +3,5 @@ dist
 coverage
 package-lock.json
 .claude
+# The trailing comma is the bug this benchmark task asks the agent to find.
+bench/tasks/server-health/fixture/data/items.json

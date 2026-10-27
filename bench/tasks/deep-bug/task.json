@@ -1,0 +1,5 @@
+{
+  "prompt": "Customers report that some invoice totals are a cent short, and `node --test` fails. Find the cause and fix it so every test passes. Do not change the tests.",
+  "timeoutSec": 900,
+  "check": ["node", "{task}/check.mjs"]
+}

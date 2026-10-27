@@ -170,7 +170,7 @@ Planned work:
 
 - Permission rules for specific commands and paths, kept across sessions.
 - Background shells in OAuth sessions.
-- Larger benchmark tasks and published comparison runs.
+- Published benchmark runs against other coding agents.
 - Windows process management without WSL.
 
 ## Contributing
