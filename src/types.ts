@@ -14,6 +14,8 @@ export interface Settings {
   fast: boolean;
   maxTokens: number;
   maxTurns: number;
+  /** Context size in tokens at which API conversations are summarized. */
+  compactAt: number;
   permissionMode: PermissionMode;
   protectedPaths: string[];
 }
@@ -24,6 +26,8 @@ export interface AgentUI {
   status(value: string): void;
   idle(): void;
   notice(value: string): void;
+  /** Stream a progress note the model writes between tool calls. */
+  progress(value: string): void;
   tool(name: string, input: Record<string, unknown>): void;
   diff(path: string, before: string, after: string): void;
 }

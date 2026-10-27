@@ -62,6 +62,7 @@ export class TerminalUI implements AgentUI {
   private redactor = new StreamingRedactor();
   private hasText = false;
   private endsWithNewline = true;
+  private progressOpen = false;
   private readonly colors;
 
   constructor(
@@ -75,6 +76,7 @@ export class TerminalUI implements AgentUI {
 
   text(value: string): void {
     this.idle();
+    this.endProgress();
     const clean = terminalText(this.redactor.write(value));
     if (clean) {
       this.out.write(clean);
@@ -130,15 +132,40 @@ export class TerminalUI implements AgentUI {
     this.spinnerVisible = false;
   }
 
+  progress(value: string): void {
+    this.idle();
+    this.endText();
+    const clean = terminalText(redact(value));
+    if (!clean) return;
+    const lines = clean.split('\n');
+    lines.forEach((line, index) => {
+      if (index > 0) {
+        if (this.progressOpen) this.err.write('\n');
+        this.progressOpen = false;
+      }
+      if (!line) return;
+      this.err.write(this.colors.dim(line));
+      this.progressOpen = true;
+    });
+  }
+
+  private endProgress(): void {
+    if (!this.progressOpen) return;
+    this.err.write('\n');
+    this.progressOpen = false;
+  }
+
   notice(value: string): void {
     this.idle();
     this.endText();
+    this.endProgress();
     this.err.write(`${terminalText(redact(value))}\n`);
   }
 
   tool(name: string, input: Record<string, unknown>): void {
     this.idle();
     this.endText();
+    this.endProgress();
     this.err.write(`${this.colors.cyan(toolSummary(name, input))}\n`);
   }
 

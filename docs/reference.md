@@ -28,7 +28,9 @@ If both a prompt argument and piped input are present, ArnCode combines them. As
 arncode -p "Describe this project in one paragraph" > description.txt
 ```
 
-The Messages API backend always streams and uses adaptive thinking. Output-limit continuation attempts are bounded, and incomplete tool calls are not executed. A request has at most four retries for rate-limit or overload responses. `retry-after` and rate-limit reset headers inform delays; a delay beyond the wait limit ends the attempt. Credential-specific failures may trigger failover, while a transient overload does not exhaust an account.
+The Messages API backend always streams and uses adaptive thinking. Output-limit continuation attempts are bounded, and incomplete tool calls are not executed.
+
+On the official endpoint, requests also opt into these features where the model supports them: progress notes between tool calls (shown on stderr), server-side refusal fallback to another model, streamed tool input, and thinking blocks that degrade instead of failing when a resumed history no longer matches them. The conversation history is append-only: each conversation keeps the system prompt it started with, `/effort` changes apply through a message that keeps the prompt cache, and read-only tool calls from one response run in parallel. When the context passes `compactAt` tokens (default 200,000), the API summarizes the conversation and the task continues from the summary. Other endpoints receive only widely compatible fields and a bounded history; set `ARNCODE_API_FEATURES=full` for an endpoint that supports the official feature set. A request has at most four retries for rate-limit or overload responses. `retry-after` and rate-limit reset headers inform delays; a delay beyond the wait limit ends the attempt. Credential-specific failures may trigger failover, while a transient overload does not exhaust an account.
 
 ### Prompt caching
 
@@ -111,6 +113,7 @@ Settings resolve in this order: command-line flags, environment variables, `~/.a
   "fast": false,
   "maxTokens": 64000,
   "maxTurns": 80,
+  "compactAt": 200000,
   "permissionMode": "full"
 }
 ```
@@ -129,6 +132,8 @@ Use `"permissionMode": "ask"` for persistent approval prompts. A configured `aut
 | `ARNCODE_FAST`                     | Fast mode: `true`, `false`, `1`, or `0`                                |
 | `ARNCODE_MAX_TOKENS`               | Maximum output tokens per API response                                 |
 | `ARNCODE_MAX_TURNS`                | Maximum turns per task                                                 |
+| `ARNCODE_COMPACT_AT`               | Context size in tokens at which API conversations are summarized       |
+| `ARNCODE_API_FEATURES`             | `full` or `basic`; overrides the endpoint-based feature selection      |
 | `ARNCODE_CONFIG_DIR`               | Alternate directory for state, global instructions, and ArnCode skills |
 
 See [`.env.example`](../.env.example) for placeholders. ArnCode does not automatically load `.env` files. Relative `ARNCODE_CONFIG_DIR` paths resolve from the current working directory; credential storage must stay outside Git repositories.

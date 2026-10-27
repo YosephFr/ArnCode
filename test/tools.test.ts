@@ -19,6 +19,7 @@ beforeEach(async () => {
     status: vi.fn(),
     idle: vi.fn(),
     notice: vi.fn(),
+    progress: vi.fn(),
     tool: vi.fn(),
     diff: vi.fn(),
   };

@@ -54,6 +54,13 @@ const schemas = {
 
 export { schemas as toolSchemas };
 
+// Tools without side effects can run concurrently within one model turn.
+const parallelSafe = new Set(['read_file', 'list_dir', 'glob', 'grep', 'skill']);
+
+export function isParallelSafe(name: string): boolean {
+  return parallelSafe.has(name);
+}
+
 export interface ToolResult {
   content: string;
   is_error?: boolean;

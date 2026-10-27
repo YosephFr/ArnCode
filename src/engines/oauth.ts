@@ -234,6 +234,7 @@ export async function oauthOptions(
       status: quiet,
       idle: quiet,
       notice: quiet,
+      progress: quiet,
       tool: quiet,
       diff: quiet,
     },

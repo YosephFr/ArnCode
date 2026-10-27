@@ -39,6 +39,7 @@ const userConfigSchema = z
     fast: z.boolean().optional(),
     maxTokens: z.number().int().min(1).max(128000).optional(),
     maxTurns: z.number().int().min(1).max(1000).optional(),
+    compactAt: z.number().int().min(20_000).max(10_000_000).optional(),
     permissionMode: z.enum(['full', 'ask']).optional(),
     protectedPaths: z
       .array(
@@ -62,6 +63,7 @@ export const DEFAULTS = {
   fast: false,
   maxTokens: 64000,
   maxTurns: 80,
+  compactAt: 200_000,
   permissionMode: 'full',
   protectedPaths: [...DEFAULT_PROTECTED_PATHS],
 } satisfies Omit<Settings, 'cwd'>;
@@ -132,6 +134,11 @@ export function resolveSettings(
       DEFAULTS.maxTokens,
     maxTurns:
       flags.maxTurns ?? envInteger(env.ARNCODE_MAX_TURNS) ?? config.maxTurns ?? DEFAULTS.maxTurns,
+    compactAt:
+      flags.compactAt ??
+      envInteger(env.ARNCODE_COMPACT_AT) ??
+      config.compactAt ??
+      DEFAULTS.compactAt,
     permissionMode: flags.permissionMode ?? config.permissionMode ?? DEFAULTS.permissionMode,
   });
   return {

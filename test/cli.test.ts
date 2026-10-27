@@ -16,10 +16,20 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+type MockBlock =
+  | { type: 'text'; text: string[] }
+  | { type: 'thinking'; text?: string }
+  | { type: 'tool'; name: string; id: string; input: Record<string, unknown> }
+  | { type: 'fallback'; from: string; to: string }
+  | { type: 'compaction'; content: string };
+
 interface Reply {
   text?: string[];
   tool?: { name: string; id: string; input: Record<string, unknown> };
-  stop?: StopReason;
+  blocks?: MockBlock[];
+  stop?: StopReason | 'compaction';
+  stopDetails?: { category: 'cyber' | 'bio' | null; explanation: string | null };
+  inputTokens?: number;
 }
 interface CapturedRequest {
   url?: string;
@@ -94,44 +104,91 @@ function streamReply(
       },
     },
   });
-  if (reply.tool) {
-    emit({
-      type: 'content_block_start',
-      index: 0,
-      content_block: {
-        type: 'tool_use',
-        id: reply.tool.id,
-        name: reply.tool.name,
-        input: {},
-        caller: { type: 'direct' },
-      },
-    });
-    emit({
-      type: 'content_block_delta',
-      index: 0,
-      delta: { type: 'input_json_delta', partial_json: JSON.stringify(reply.tool.input) },
-    });
-  } else {
-    emit({
-      type: 'content_block_start',
-      index: 0,
-      content_block: { type: 'text', text: '', citations: null },
-    });
-    for (const text of reply.text ?? []) {
-      emit({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+  const blocks: MockBlock[] =
+    reply.blocks ??
+    (reply.tool ? [{ type: 'tool', ...reply.tool }] : [{ type: 'text', text: reply.text ?? [] }]);
+  const raw = (event: Record<string, unknown>) =>
+    response.write(`event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`);
+  blocks.forEach((block, index) => {
+    if (block.type === 'tool') {
+      emit({
+        type: 'content_block_start',
+        index,
+        content_block: {
+          type: 'tool_use',
+          id: block.id,
+          name: block.name,
+          input: {},
+          caller: { type: 'direct' },
+        },
+      });
+      emit({
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input) },
+      });
+    } else if (block.type === 'thinking') {
+      raw({
+        type: 'content_block_start',
+        index,
+        content_block: { type: 'thinking', thinking: '', signature: '' },
+      });
+      if (block.text)
+        raw({
+          type: 'content_block_delta',
+          index,
+          delta: { type: 'thinking_delta', thinking: block.text },
+        });
+      raw({
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'signature_delta', signature: `signature-${index}` },
+      });
+    } else if (block.type === 'fallback') {
+      raw({
+        type: 'content_block_start',
+        index,
+        content_block: {
+          type: 'fallback',
+          from: { model: block.from },
+          to: { model: block.to },
+          trigger: { type: 'refusal' },
+        },
+      });
+    } else if (block.type === 'compaction') {
+      raw({
+        type: 'content_block_start',
+        index,
+        content_block: {
+          type: 'compaction',
+          content: block.content,
+          encrypted_content: null,
+          signature: 'compaction-signature',
+        },
+      });
+    } else {
+      emit({
+        type: 'content_block_start',
+        index,
+        content_block: { type: 'text', text: '', citations: null },
+      });
+      for (const text of block.text) {
+        emit({ type: 'content_block_delta', index, delta: { type: 'text_delta', text } });
+      }
     }
-  }
-  emit({ type: 'content_block_stop', index: 0 });
+    emit({ type: 'content_block_stop', index });
+  });
   emit({
     type: 'message_delta',
     delta: {
-      stop_reason: reply.stop ?? (reply.tool ? 'tool_use' : 'end_turn'),
+      stop_reason: (reply.stop ??
+        (blocks.some((block) => block.type === 'tool') ? 'tool_use' : 'end_turn')) as StopReason,
       stop_sequence: null,
-      stop_details: null,
+      stop_details: reply.stopDetails ? { type: 'refusal', ...reply.stopDetails } : null,
       container: null,
     },
     usage: {
-      input_tokens: 40,
+      input_tokens: reply.inputTokens ?? 40,
       output_tokens: 12,
       cache_creation_input_tokens: 10,
       cache_read_input_tokens: 20,
@@ -198,6 +255,7 @@ async function runCLI(
   url: string,
   args: string[],
   stdin = '',
+  extraEnv: Record<string, string> = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
@@ -206,6 +264,7 @@ async function runCLI(
   env.ANTHROPIC_API_KEY = 'arncode-offline-test-key';
   env.ARNCODE_CONFIG_DIR = config;
   env.NO_COLOR = '1';
+  Object.assign(env, extraEnv);
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
@@ -460,5 +519,141 @@ describe('offline CLI journeys', () => {
     expect(await readFile(path.join(config, 'sessions', sessions[0]!), 'utf8')).not.toContain(
       '"type": "tool_use"',
     );
+  }, 30_000);
+});
+
+describe('official-endpoint API features', () => {
+  const full = { ARNCODE_API_FEATURES: 'full' };
+
+  it('streams progress notes to stderr, runs reads in parallel and keeps the prefix frozen', async () => {
+    await writeFile(path.join(project, 'a.txt'), 'alpha\n');
+    await writeFile(path.join(project, 'b.txt'), 'beta\n');
+    const api = await mockAPI([
+      {
+        blocks: [
+          { type: 'thinking', text: 'Checking both files first.' },
+          { type: 'tool', name: 'read_file', id: 'read_a', input: { path: 'a.txt' } },
+          { type: 'tool', name: 'read_file', id: 'read_b', input: { path: 'b.txt' } },
+        ],
+      },
+      { blocks: [{ type: 'thinking' }, { type: 'text', text: ['Both files are present.\n'] }] },
+      { text: ['Summarized.\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Check a.txt and b.txt.'], '', full);
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toBe('Both files are present.\n');
+    expect(run.stderr).toContain('Checking both files first.');
+    const first = api.requests[0]!;
+    expect(first.url).toBe('/v1/messages');
+    expect(String(first.headers['anthropic-beta']).split(',')).toEqual(
+      expect.arrayContaining([
+        'thinking-binding-controls-2026-08-01',
+        'thinking-display-updates-2026-08-18',
+        'server-side-fallback-2026-07-01',
+      ]),
+    );
+    expect(first.body).toMatchObject({
+      thinking: { type: 'adaptive', display: 'updates' },
+      fallbacks: 'default',
+    });
+    const second = api.requests[1]!.body.messages;
+    expect(second.at(-2)).toMatchObject({
+      role: 'assistant',
+      content: [
+        { type: 'thinking', signature: 'signature-0' },
+        { type: 'tool_use', id: 'read_a' },
+        { type: 'tool_use', id: 'read_b' },
+      ],
+    });
+    expect(second.at(-1)).toMatchObject({
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'read_a', content: expect.stringContaining('alpha') },
+        { type: 'tool_result', tool_use_id: 'read_b', content: expect.stringContaining('beta') },
+      ],
+    });
+
+    const resumed = await runCLI(
+      api.url,
+      ['--continue', '--effort', 'high', '-p', 'Summarize.'],
+      '',
+      full,
+    );
+    expect(resumed.code, resumed.stderr).toBe(0);
+    const third = api.requests[2]!;
+    expect(third.body.system).toEqual(first.body.system);
+    expect(third.body.output_config).toEqual({ effort: 'medium' });
+    expect(third.body.messages.at(-2)).toEqual({
+      role: 'system',
+      content: [],
+      output_config: { effort: 'high' },
+    });
+    expect(String(third.headers['anthropic-beta'])).toContain(
+      'mid-conversation-output-config-2026-07-01',
+    );
+  }, 30_000);
+
+  it('summarizes a large conversation on the server and continues from the summary', async () => {
+    await writeFile(path.join(project, 'notes.txt'), 'remember the walnut\n');
+    const api = await mockAPI([
+      {
+        tool: { name: 'read_file', id: 'read_notes', input: { path: 'notes.txt' } },
+        inputTokens: 30_000,
+      },
+      {
+        blocks: [{ type: 'compaction', content: 'Summary: notes.txt mentions a walnut.' }],
+        stop: 'compaction',
+      },
+      { text: ['Done after the summary.\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Read the notes.'], '', {
+      ...full,
+      ARNCODE_COMPACT_AT: '20000',
+    });
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toBe('Done after the summary.\n');
+    expect(run.stderr).toContain('Conversation summarized');
+    expect(api.requests).toHaveLength(3);
+    expect(api.requests[1]!.body).toMatchObject({ compaction: { type: 'summarize' } });
+    expect(api.requests[1]!.body).not.toHaveProperty('fallbacks');
+    expect(api.requests[1]!.body.messages.at(-1)).toMatchObject({
+      content: [{ type: 'tool_result', tool_use_id: 'read_notes' }],
+    });
+    const after = api.requests[2]!.body.messages;
+    expect(after).toHaveLength(2);
+    expect(after[0]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'compaction', content: 'Summary: notes.txt mentions a walnut.' }],
+    });
+    expect(JSON.stringify(after[1])).toContain('Continue the task from the summary');
+    expect(String(api.requests[2]!.headers['anthropic-beta'])).toContain('compact-2026-09-04');
+    const [file] = await readdir(path.join(config, 'sessions'));
+    expect(JSON.parse(await readFile(path.join(config, 'sessions', file!), 'utf8'))).toMatchObject({
+      compactions: 1,
+    });
+  }, 30_000);
+
+  it('reports refusal fallbacks and explains final refusals', async () => {
+    const api = await mockAPI([
+      {
+        blocks: [
+          { type: 'fallback', from: 'claude-opus-5-5', to: 'claude-opus-5' },
+          { type: 'text', text: ['Answer from the fallback.\n'] },
+        ],
+      },
+      {
+        blocks: [],
+        stop: 'refusal',
+        stopDetails: { category: 'cyber', explanation: 'This request was declined.' },
+      },
+    ]);
+    const first = await runCLI(api.url, ['-p', 'Explain the parser.'], '', full);
+    expect(first.code, first.stderr).toBe(0);
+    expect(first.stdout).toBe('Answer from the fallback.\n');
+    expect(first.stderr).toContain('claude-opus-5-5 declined; claude-opus-5 continues.');
+    const second = await runCLI(api.url, ['--continue', '-p', 'Go on.'], '', full);
+    expect(second.code).toBe(1);
+    expect(second.stderr).toContain('Claude declined this request (cyber)');
+    expect(second.stderr).toContain('This request was declined.');
   }, 30_000);
 });

@@ -75,6 +75,7 @@ async function context(overrides: Partial<Settings> = {}): Promise<EngineContext
       status: vi.fn(),
       idle: vi.fn(),
       notice: vi.fn(),
+      progress: vi.fn(),
       tool: vi.fn(),
       diff: vi.fn(),
     },

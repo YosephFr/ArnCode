@@ -1,16 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { MessageParam } from '@anthropic-ai/sdk/resources/messages';
+import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { getConfigDir } from './config.js';
 import { atomicWriteJson, readJson } from './storage.js';
 import { redact } from './redact.js';
 import { emptyUsage, type UsageTotals } from './usage.js';
-import type { AuthMode, Settings } from './types.js';
+import type { AuthMode, Effort, Settings } from './types.js';
 
 export interface TranscriptEntry {
   role: 'user' | 'assistant' | 'tool';
   text: string;
+}
+
+/** Request prefix frozen for one API conversation, so cached and thinking prefixes stay valid. */
+export interface ApiConversation {
+  system: string;
+  /** Top-level effort sent on every request until the next compaction. */
+  effort: Effort;
+  /** Effort applied later through effort-only system messages. */
+  messageEffort?: Effort;
 }
 
 export interface Session {
@@ -22,10 +31,14 @@ export interface Session {
   model: string;
   engine: AuthMode;
   credential?: string;
-  messages: MessageParam[];
+  messages: BetaMessageParam[];
   transcript: TranscriptEntry[];
   usage: UsageTotals;
   peakContextTokens?: number;
+  /** Tokens the next request would carry, from the latest response. */
+  contextTokens?: number;
+  api?: ApiConversation;
+  compactions?: number;
 }
 
 export function newSession(settings: Settings): Session {
@@ -136,6 +149,8 @@ export function switchEngine(session: Session, engine: AuthMode): void {
   if (session.engine === engine) return;
   session.engine = engine;
   session.messages = [{ role: 'user', content: portableContext(session) }];
+  delete session.api;
+  delete session.contextTokens;
 }
 
 function shorten(text: string, limit: number): string {
@@ -145,9 +160,9 @@ function shorten(text: string, limit: number): string {
   return text.slice(0, Math.floor(room * 0.7)) + marker + text.slice(-Math.ceil(room * 0.3));
 }
 
-export function apiContext(messages: MessageParam[], maxChars = 500_000): MessageParam[] {
+export function apiContext(messages: BetaMessageParam[], maxChars = 500_000): BetaMessageParam[] {
   if (JSON.stringify(messages).length <= maxChars) return messages;
-  const bounded = messages.map((message): MessageParam => {
+  const bounded = messages.map((message): BetaMessageParam => {
     if (message.role === 'system') return message;
     if (typeof message.content === 'string')
       return { ...message, content: shorten(message.content, Math.floor(maxChars / 3)) };
@@ -163,7 +178,7 @@ export function apiContext(messages: MessageParam[], maxChars = 500_000): Messag
       }),
     };
   });
-  const units: MessageParam[][] = [];
+  const units: BetaMessageParam[][] = [];
   for (const message of bounded) {
     const results =
       message.role === 'user' &&
@@ -183,11 +198,11 @@ export function apiContext(messages: MessageParam[], maxChars = 500_000): Messag
     typeof first?.content === 'string'
       ? shorten(first.content, Math.min(12_000, Math.floor(maxChars / 10)))
       : '';
-  const intro: MessageParam = {
+  const intro: BetaMessageParam = {
     role: 'user',
     content: `${original}\n[Older messages omitted to fit context. Inspect files as needed.]`,
   };
-  const kept: MessageParam[][] = [];
+  const kept: BetaMessageParam[][] = [];
   let size = JSON.stringify(intro).length + 4;
   for (const unit of units.reverse()) {
     const length = JSON.stringify(unit).length + 1;
