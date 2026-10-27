@@ -16,6 +16,7 @@ import {
 import type { EngineContext } from '../src/engines/types.js';
 import { newSession } from '../src/session.js';
 import type { Settings } from '../src/types.js';
+import { modelEffort } from '../src/models.js';
 
 function setup(overrides: Partial<Settings> = {}, messages: BetaMessageParam[] = []) {
   const settings: Settings = { ...DEFAULTS, cwd: '/project', ...overrides };
@@ -55,6 +56,14 @@ describe('model switches', () => {
     expect(older.betas ?? []).not.toContain('mid-conversation-output-config-2026-07-01');
     // The saved history keeps its original shape for when the model changes back.
     expect(session.messages).toHaveLength(5);
+    // The effort set by that dropped message still applies, at the top level.
+    session.api = { ...session.api!, effort: 'max', messageEffort: 'high' };
+    expect(
+      apiRequest({ ...settings, model: 'claude-sonnet-4-6' }, session, 'full').output_config,
+    ).toEqual({
+      effort: modelEffort('claude-sonnet-4-6', 'high'),
+    });
+    expect(apiRequest(settings, session, 'full').output_config).toEqual({ effort: 'max' });
   });
 });
 

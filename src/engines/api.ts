@@ -226,7 +226,17 @@ export function apiRequest(
     messages: cacheConversation(messages),
     ...(thinking ? { thinking } : {}),
     ...(features.adaptive
-      ? { output_config: { effort: modelEffort(settings.model, conversation.effort) } }
+      ? {
+          output_config: {
+            // Without per-message effort, the latest change has to travel at the top level.
+            effort: modelEffort(
+              settings.model,
+              full && features.messageEffort
+                ? conversation.effort
+                : (conversation.messageEffort ?? conversation.effort),
+            ),
+          },
+        }
       : {}),
     ...(fast ? { speed: 'fast' as const } : {}),
     ...(fallbacks ? { fallbacks: 'default' as const } : {}),
