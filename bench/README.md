@@ -44,13 +44,13 @@ Each `results.jsonl` line holds `task`, `contestant`, `version`, `run`, `started
 
 `usage` has `inputTokens` (uncached input), `outputTokens` (including reasoning), `cacheReadTokens`, `cacheWriteTokens`, `costUsd` (the tool's estimate) and `turns` (model requests). Figures a tool does not report stay `null`:
 
-| Parser        | Reads                                     | Tokens                                                                | Cost                                                                    | Turns       |
-| ------------- | ----------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------- |
-| `arncode`     | the `Session:` line on stderr             | as printed                                                            | `$X estimated`; null when unavailable, partly unpriced or under $0.0001 | null        |
-| `claude-code` | the `--output-format json` result         | `modelUsage` summed over models; `usage` (main loop only) when absent | `total_cost_usd`                                                        | `num_turns` |
-| `opencode`    | `step_finish` events from `--format json` | output plus reasoning; cache reads and writes as reported             | sum of step costs                                                       | step count  |
-| `codex`       | `turn.completed` events from `--json`     | uncached is input minus cached reads and cache writes                 | null                                                                    | null        |
-| `none`        | nothing                                   | null                                                                  | null                                                                    | null        |
+| Parser        | Reads                                                                      | Tokens                                                                | Cost                                                                                 | Turns       |
+| ------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------- |
+| `arncode`     | the `--output-format json` result; the `Session:` line on stderr otherwise | as reported                                                           | `total_cost_usd`; from the `Session:` line, null when unavailable or partly unpriced | `num_turns` |
+| `claude-code` | the `--output-format json` result                                          | `modelUsage` summed over models; `usage` (main loop only) when absent | `total_cost_usd`                                                                     | `num_turns` |
+| `opencode`    | `step_finish` events from `--format json`                                  | output plus reasoning; cache reads and writes as reported             | sum of step costs                                                                    | step count  |
+| `codex`       | `turn.completed` events from `--json`                                      | uncached is input minus cached reads and cache writes                 | null                                                                                 | null        |
+| `none`        | nothing                                                                    | null                                                                  | null                                                                                 | null        |
 
 The report shows, per task and contestant, the pass rate, median and nearest-rank p90 time, and mean tokens and cost. Means skip runs that reported nothing and show how many runs they cover, such as `0.1234 (2/3)`.
 

@@ -19,6 +19,7 @@ import { themeFor } from './tui/theme.js';
 import { TerminalUI, displayName, toolSummary } from './ui.js';
 import { formatUsage } from './usage.js';
 import { usageDifference } from './engines/oauth.js';
+import { JsonUI, type OutputFormat } from './json-output.js';
 import type { ExitPlan, PermissionMode, Settings } from './types.js';
 
 interface CliOptions {
@@ -41,6 +42,7 @@ interface CliOptions {
   ask?: boolean;
   resume?: string;
   continue?: boolean;
+  outputFormat?: OutputFormat;
 }
 
 const ui = new TerminalUI();
@@ -88,6 +90,13 @@ const program = new Command()
   .option('--yolo', 'Alias for --dangerously-skip-permissions')
   .option('--safe', 'Ask before writes, edits, and shell commands')
   .option('--ask', 'Alias for --safe')
+  .addOption(
+    new Option('--output-format <format>', 'Output with -p (default: text)').choices([
+      'text',
+      'json',
+      'stream-json',
+    ]),
+  )
   .option('-r, --resume <id>', 'Resume a saved session')
   .option('-c, --continue', 'Resume the latest session in this project')
   .showHelpAfterError()
@@ -313,6 +322,41 @@ program.action(async (options: CliOptions) => {
       }
     }
   };
+
+  if (oneShot && options.outputFormat && options.outputFormat !== 'text') {
+    const json = new JsonUI(options.outputFormat);
+    json.init(state.session, settings);
+    active = new AbortController();
+    const before = { ...state.session.usage };
+    const started = Date.now();
+    let error: string | undefined;
+    try {
+      await runTask({
+        settings,
+        session: state.session,
+        prompt,
+        ui: json,
+        signal: active.signal,
+        approve: permissions.approve,
+      });
+    } catch (failure) {
+      if (active.signal.aborted) process.exitCode = 130;
+      else {
+        error = errorText(failure);
+        process.exitCode = 1;
+      }
+    } finally {
+      const interrupted = active.signal.aborted;
+      active = undefined;
+      await saveSession(state.session);
+      const turn = usageDifference(state.session.usage, before);
+      turn.requests = state.session.usage.requests - before.requests;
+      json.result(state.session, turn, { durationMs: Date.now() - started, error, interrupted });
+      process.off('SIGINT', interrupt);
+      process.off('SIGTERM', terminate);
+    }
+    return;
+  }
 
   if (oneShot) {
     ui.notice(

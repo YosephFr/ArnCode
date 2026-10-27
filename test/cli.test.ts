@@ -711,3 +711,58 @@ describe('official-endpoint API features', () => {
     expect(second.stderr).toContain('This request was declined.');
   }, 30_000);
 });
+
+describe('machine-readable output', () => {
+  it('prints one JSON result, or a stream of JSON events, on stdout', async () => {
+    const api = await mockAPI([
+      {
+        tool: {
+          name: 'write_file',
+          id: 'write_note',
+          input: { path: 'note.txt', content: 'saved\n' },
+        },
+      },
+      { text: ['Saved the note.\n'] },
+      { text: ['Second answer.\n'] },
+    ]);
+    const streamed = await runCLI(api.url, [
+      '-p',
+      'Save a note.',
+      '--output-format',
+      'stream-json',
+    ]);
+    expect(streamed.code, streamed.stderr).toBe(0);
+    const events = streamed.stdout
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string });
+    expect(events.map((event) => event.type)).toEqual([
+      'init',
+      'tool_use',
+      'file_change',
+      'tool_result',
+      'text',
+      'result',
+    ]);
+    expect(events[2]).toMatchObject({ path: 'note.txt', created: true, added: 1 });
+    expect(events.at(-1)).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'Saved the note.\n',
+      num_turns: 2,
+      usage: { input_tokens: 80, output_tokens: 24 },
+    });
+    const single = await runCLI(api.url, [
+      '--continue',
+      '-p',
+      'Answer again.',
+      '--output-format',
+      'json',
+    ]);
+    expect(single.code, single.stderr).toBe(0);
+    const result = JSON.parse(single.stdout) as Record<string, unknown>;
+    expect(result).toMatchObject({ result: 'Second answer.\n', num_turns: 1 });
+    expect(result.session_id).toMatch(/^[0-9a-f-]{36}$/);
+  }, 30_000);
+});

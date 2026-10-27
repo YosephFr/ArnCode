@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Report, ResultRow } from '../bench/report.js';
 import { parseUsage } from '../bench/usage.js';
 import { emptyUsage, formatUsage, type UsageTotals } from '../src/usage.js';
+import { DEFAULTS } from '../src/config.js';
+import { JsonUI } from '../src/json-output.js';
+import { newSession } from '../src/session.js';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 let temporary: string;
@@ -180,6 +183,20 @@ describe('benchmark harness', () => {
     expect(arncode({ ...session, unpricedRequests: 1 }).costUsd).toBeNull();
     expect(arncode({ ...session, costUsd: 0.00004 }).costUsd).toBeNull();
     expect(arncode(emptyUsage())).toMatchObject({ inputTokens: 0, costUsd: 0 });
+    // --output-format json reports exact figures, including the number of model requests.
+    let printed = '';
+    const json = new JsonUI('json', (line: string) => {
+      printed = line;
+    });
+    json.result(newSession({ ...DEFAULTS, cwd: '/project' }), session, { durationMs: 1000 });
+    expect(parseUsage('arncode', printed, '')).toEqual({
+      inputTokens: 2345,
+      outputTokens: 1234,
+      cacheReadTokens: 45_678,
+      cacheWriteTokens: 3456,
+      costUsd: 0.1234,
+      turns: 3,
+    });
 
     const claude = {
       type: 'result',

@@ -63,7 +63,22 @@ function jsonLines(text: string): Json[] {
 const SESSION =
   /^Session: ([\d,]+) uncached in · ([\d,]+) out · ([\d,]+) cache read · ([\d,]+) cache write · (.+)$/;
 
-function arncode(_stdout: string, stderr: string): Usage {
+function arncode(stdout: string, stderr: string): Usage {
+  // `--output-format json` prints one result object with exact figures.
+  const result = jsonLines(stdout)
+    .reverse()
+    .find((event) => event.type === 'result');
+  if (result) {
+    const usage = isObject(result.usage) ? result.usage : {};
+    return {
+      inputTokens: figure(usage.input_tokens),
+      outputTokens: figure(usage.output_tokens),
+      cacheReadTokens: figure(usage.cache_read_input_tokens),
+      cacheWriteTokens: figure(usage.cache_creation_input_tokens),
+      costUsd: figure(result.total_cost_usd),
+      turns: figure(result.num_turns),
+    };
+  }
   const lines = stripVTControlCharacters(stderr).split('\n').reverse();
   for (const line of lines) {
     if (line.trim() === 'Session: No usage yet.') {

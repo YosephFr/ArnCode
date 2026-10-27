@@ -7,6 +7,7 @@
 | Option                                     | Behavior                                                                    |
 | ------------------------------------------ | --------------------------------------------------------------------------- |
 | `-p, --print [prompt]`                     | Run once; read stdin when the prompt is omitted                             |
+| `--output-format <format>`                 | With `-p`: `text` (default), `json`, or `stream-json`                       |
 | `--cwd <directory>`                        | Work in this directory; defaults to the current directory                   |
 | `--auth <type>`                            | Restrict credentials to `api-key` or `oauth`                                |
 | `--credential <name>`, `--profile <name>`  | Pin one credential without failover                                         |
@@ -29,6 +30,8 @@ If both a prompt argument and piped input are present, ArnCode combines them. As
 ```sh
 arncode -p "Describe this project in one paragraph" > description.txt
 ```
+
+`--output-format json` prints one result object on stdout when the run ends: `result` (the final reply), `subtype` (`success`, `error`, or `interrupted`), `is_error`, `session_id`, `model`, `credential`, `duration_ms`, `num_turns`, `total_cost_usd` (`null` when unpriced), and `usage` with input, output, cache-read, and cache-write tokens. `stream-json` prints one JSON event per line as the run happens (`init`, `progress`, `text`, `tool_use`, `tool_result`, `file_change`, `notice`), followed by the same result object.
 
 The Messages API backend always streams and uses adaptive thinking. Output-limit continuation attempts are bounded, and incomplete tool calls are not executed.
 
