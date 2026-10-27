@@ -42,6 +42,8 @@ const HOOK_NAMES: Record<string, string> = {
   write_file: 'Write',
   edit_file: 'Edit',
   bash: 'Bash',
+  bash_output: 'BashOutput',
+  kill_shell: 'KillShell',
   glob: 'Glob',
   grep: 'Grep',
   list_dir: 'LS',

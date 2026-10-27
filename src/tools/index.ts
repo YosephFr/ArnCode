@@ -18,6 +18,7 @@ import type { PreparedImage } from '../images.js';
 import type { Hooks } from '../hooks.js';
 import { globFiles, grepFiles } from './search.js';
 import { runProcess } from './process.js';
+import { readJob, startJob, stopJob } from './background.js';
 import { loadSkill } from '../skills.js';
 import { createPathPolicy } from './paths.js';
 
@@ -83,8 +84,11 @@ const schemas = {
     .object({
       command: z.string().min(1).max(128_000),
       timeout_ms: z.number().int().min(1).max(1_800_000).default(120_000),
+      run_in_background: z.boolean().default(false),
     })
     .strict(),
+  bash_output: z.object({ id: z.string().min(1).max(40) }).strict(),
+  kill_shell: z.object({ id: z.string().min(1).max(40) }).strict(),
 };
 
 export { schemas as toolSchemas };
@@ -108,7 +112,15 @@ async function outputLogPath(): Promise<string> {
 }
 
 // Tools without side effects can run concurrently within one model turn.
-const parallelSafe = new Set(['read_file', 'list_dir', 'glob', 'grep', 'skill', 'task']);
+const parallelSafe = new Set([
+  'read_file',
+  'list_dir',
+  'glob',
+  'grep',
+  'skill',
+  'task',
+  'bash_output',
+]);
 
 export function isParallelSafe(name: string): boolean {
   return parallelSafe.has(name);
@@ -257,7 +269,15 @@ export class ToolRunner {
       }
       const value = parsed.data;
       const cwd = await realpath(this.options.cwd);
-      const policy = ['bash', 'skill', 'exit_plan_mode', 'todo_write', 'task'].includes(tool)
+      const policy = [
+        'bash',
+        'bash_output',
+        'kill_shell',
+        'skill',
+        'exit_plan_mode',
+        'todo_write',
+        'task',
+      ].includes(tool)
         ? undefined
         : await createPathPolicy(cwd, this.options.protectedPaths);
       this.options.ui.tool(name, value);
@@ -364,8 +384,17 @@ export class ToolRunner {
         case 'grep':
           content = await grepFiles(cwd, schemas.grep.parse(value), signal, policy);
           break;
+        case 'bash_output':
+          return { content: readJob(schemas.bash_output.parse(value).id) };
+        case 'kill_shell':
+          return { content: await stopJob(schemas.kill_shell.parse(value).id) };
         case 'bash': {
-          const { command, timeout_ms } = schemas.bash.parse(value);
+          const { command, timeout_ms, run_in_background } = schemas.bash.parse(value);
+          if (run_in_background) {
+            if (this.options.allowedTools && !this.options.allowedTools.includes('bash_output'))
+              throw new Error('Background commands are not available here; run it to completion.');
+            return { content: await startJob(command, cwd) };
+          }
           const logFile = await outputLogPath();
           const result = await runProcess({
             command: 'bash',

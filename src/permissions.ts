@@ -21,6 +21,8 @@ const readOnlyTools = new Set([
   'todo_write',
   'exit_plan_mode',
   'task',
+  'bash_output',
+  'kill_shell',
   'mcp__arncode__skill',
   'mcp__arncode__glob',
   'mcp__arncode__grep',

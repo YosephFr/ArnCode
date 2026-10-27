@@ -40,6 +40,7 @@ export function toolSummary(name: string, input: Record<string, unknown>): strin
     shownPath(input.path) ??
     input.url ??
     input.query ??
+    input.id ??
     input.description ??
     input.name ??
     '';
@@ -97,6 +98,8 @@ const DISPLAY_NAMES: Record<string, string> = {
   glob: 'Glob',
   grep: 'Search',
   bash: 'Bash',
+  bash_output: 'Shell output',
+  kill_shell: 'Stop shell',
   skill: 'Skill',
 };
 
@@ -154,6 +157,9 @@ export function resultLines(name: string, output: string): string[] {
         ...(!lines.length && (!status || status === 'Exit code: 0') ? ['Done'] : []),
       ];
     }
+    case 'bash_output':
+      // The status line, then the newest output.
+      return [...rows.slice(0, 1), ...rows.slice(1).slice(-4)];
     default:
       return [];
   }

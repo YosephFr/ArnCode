@@ -94,14 +94,37 @@ export const toolDefinitions: Tool[] = [
   {
     name: 'bash',
     description:
-      'Run a shell command in the project directory. Captures stdout and stderr separately, with bounded output. timeout_ms defaults to 120000 and may be up to 1800000. Descendants are stopped on completion, timeout or cancellation; background jobs are not persistent. This tool is not a filesystem sandbox.',
+      'Run a shell command in the project directory. Captures stdout and stderr separately, with bounded output. timeout_ms defaults to 120000 and may be up to 1800000. Descendants are stopped on completion, timeout or cancellation. For a server, watcher or other command that keeps running, set run_in_background: it returns at once with an ID and the first output; read more with bash_output and stop it with kill_shell when done. This tool is not a filesystem sandbox.',
     input_schema: {
       type: 'object',
       properties: {
         command: { type: 'string' },
         timeout_ms: { type: 'integer', minimum: 1, maximum: 1800000 },
+        run_in_background: {
+          type: 'boolean',
+          description: 'Keep the command running and return its ID instead of waiting.',
+        },
       },
       required: ['command'],
+    },
+  },
+  {
+    name: 'bash_output',
+    description:
+      'Read what a background command printed since the last read, and whether it is still running.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'The ID bash returned, such as bash_1.' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'kill_shell',
+    description: 'Stop a background command and everything it started.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
     },
   },
   {

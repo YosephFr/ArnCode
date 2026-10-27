@@ -281,6 +281,27 @@ describe('search in a git repository', () => {
   });
 });
 
+describe('background commands', () => {
+  it('keep running between calls, report new output and stop with everything they started', async () => {
+    const started = await runner.run('bash', {
+      command: 'sleep 300 & echo "child $!"; while true; do sleep 0.1; done',
+      run_in_background: true,
+    });
+    expect(started.is_error).toBeUndefined();
+    const text = String(started.content);
+    expect(text).toMatch(/^Started bash_\d+ in the background\.\nchild \d+/);
+    const id = /bash_\d+/.exec(text)![0];
+    const child = Number(/child (\d+)/.exec(text)![1]);
+    expect(String((await runner.run('bash_output', { id })).content)).toBe(
+      `${id} is running.\n[No new output]`,
+    );
+    expect((await runner.run('kill_shell', { id })).content).toBe(`Stopped ${id}.`);
+    await delay(100);
+    expect(() => process.kill(child, 0)).toThrow();
+    expect((await runner.run('bash_output', { id })).is_error).toBe(true);
+  });
+});
+
 describe('shell tool', () => {
   it('does not apply file path policies to shell commands or explicit skill loading', async () => {
     await symlink('loop', path.join(directory, 'loop'));

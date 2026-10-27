@@ -29,6 +29,7 @@ import { formatUsage } from './usage.js';
 import { MeterStore } from './metering.js';
 import { proposedChange } from './tools/files.js';
 import { projectFiles } from './tools/search.js';
+import { killAllJobs, stopAllJobs } from './tools/background.js';
 import { usageDifference } from './engines/oauth.js';
 import { JsonUI, type OutputFormat } from './json-output.js';
 import type { ExitPlan, PermissionMode, Settings } from './types.js';
@@ -58,6 +59,8 @@ interface CliOptions {
 
 const ui = new TerminalUI();
 registerEnvironmentSecrets(process.env);
+// Background commands never outlive ArnCode.
+process.on('exit', killAllJobs);
 const program = new Command()
   .name('arncode')
   .description('A coding agent with a multi-account credential bank and automatic failover')
@@ -402,6 +405,7 @@ program.action(async (options: CliOptions) => {
       const turn = usageDifference(state.session.usage, before);
       turn.requests = state.session.usage.requests - before.requests;
       json.result(state.session, turn, { durationMs: Date.now() - started, error, interrupted });
+      await stopAllJobs();
       process.off('SIGINT', interrupt);
       process.off('SIGTERM', terminate);
     }
@@ -415,6 +419,7 @@ program.action(async (options: CliOptions) => {
     try {
       await execute(prompt);
     } finally {
+      await stopAllJobs();
       input.close();
       process.stdin.pause();
       ui.idle();
@@ -585,6 +590,7 @@ program.action(async (options: CliOptions) => {
   } finally {
     app.stop();
     ui.detach();
+    await stopAllJobs();
     process.off('exit', restore);
     input.close();
     process.stdin.pause();
