@@ -43,6 +43,40 @@ describe('usage accounting', () => {
     expect(aboveThreshold.costUsd).toBeCloseTo((500.5 + 250 + 4950) / 1_000_000);
   });
 
+  it('bills each fallback and compaction attempt at its own model rate', () => {
+    const usage = usageFromAPI('claude-opus-5-5', {
+      input_tokens: 400,
+      output_tokens: 200,
+      iterations: [
+        { type: 'message', model: 'claude-opus-5-5', input_tokens: 500, output_tokens: 100 },
+        {
+          type: 'fallback_message',
+          model: 'claude-opus-5',
+          input_tokens: 400,
+          output_tokens: 200,
+          cache_read_input_tokens: 1000,
+        },
+        { type: 'compaction', input_tokens: 2000, output_tokens: 300 },
+      ],
+    });
+    const opus55 = (500 * 4 + 100 * 20 + 2000 * 4 + 300 * 20) / 1_000_000;
+    const opus5 = (400 * 5 + 200 * 25 + 1000 * 0.5) / 1_000_000;
+    expect(usage.costUsd).toBeCloseTo(opus55 + opus5);
+    expect(usage.inputTokens).toBe(2900);
+    expect(usage.outputTokens).toBe(600);
+    expect(usage.cacheReadTokens).toBe(1000);
+    expect(usage.requests).toBe(1);
+  });
+
+  it('prices Sonnet 5.5 cache reads at the published rate', () => {
+    const usage = usageFromAPI('claude-sonnet-5-5', {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 1_000_000,
+    });
+    expect(usage.costUsd).toBeCloseTo(0.2);
+  });
+
   it('keeps unknown models and custom provider rates visibly unpriced', () => {
     const input = { input_tokens: 100, output_tokens: 200 };
     for (const usage of [
