@@ -1,6 +1,9 @@
+import { execFile } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { homedir, platform, release } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { getConfigDir } from './config.js';
 import { redact } from './redact.js';
 import { discoverSkills } from './skills.js';
@@ -45,25 +48,55 @@ ${await systemPrompt(cwd)}`;
 
 export const PLAN_MODE_OFF = 'Plan mode is off. You may change files and run commands again.';
 
+const run = promisify(execFile);
+
+/** Where the session runs, captured once so the cached system prompt stays the same. */
+async function environment(cwd: string): Promise<string> {
+  const git = (args: string[]) =>
+    run('git', args, { cwd, timeout: 2000 }).then(
+      ({ stdout }) => stdout.trim(),
+      () => undefined,
+    );
+  const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const changes = branch === undefined ? undefined : await git(['status', '--porcelain']);
+  const changed = changes ? changes.split('\n').length : 0;
+  const shell = path.basename(process.env.SHELL ?? '') || 'sh';
+  return [
+    `Environment at the start of this session:`,
+    `- Date: ${new Date().toLocaleDateString('en-CA')}`,
+    `- Platform: ${platform()} ${release()}, shell ${shell}`,
+    branch === undefined
+      ? '- Not a Git repository'
+      : `- Git branch ${branch}, ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'no uncommitted changes'}`,
+  ].join('\n');
+}
+
 export async function systemPrompt(cwd: string, nativeTools = false): Promise<string> {
+  // Claude Code's global CLAUDE.md applies when there is no ArnCode one, as in OpenCode.
+  const global = path.join(getConfigDir(), 'AGENTS.md');
   const locations = [
-    ['Global instructions', path.join(getConfigDir(), 'AGENTS.md')],
+    ['Global instructions', global],
+    ['Global CLAUDE.md', path.join(homedir(), '.claude', 'CLAUDE.md')],
     ['Project CLAUDE.md', path.join(cwd, 'CLAUDE.md')],
+    ['Project CLAUDE.local.md', path.join(cwd, 'CLAUDE.local.md')],
     ['Project AGENTS.md', path.join(cwd, 'AGENTS.md')],
   ];
   const instructions: string[] = [];
   for (const [label, file] of locations) {
-    if (!file) continue;
-    const content = await instruction(file);
+    if (label === 'Global CLAUDE.md' && instructions[0]?.startsWith('Global instructions'))
+      continue;
+    const content = await instruction(file!);
     if (content) instructions.push(`${label}:\n${content}`);
   }
   const skills = await discoverSkills(cwd);
   const index = skills.length
     ? `Available skills (name: description):\n${skills.map((skill) => `${skill.name}: ${skill.description}`).join('\n')}\nLoad a relevant skill with ${nativeTools ? 'mcp__arncode__skill' : 'skill'} before following it. Its full instructions are available on demand.`
     : '';
+  // The OAuth preset describes the environment itself.
+  const context = nativeTools ? '' : `${await environment(cwd)}\n`;
   return redact(`You are ArnCode, a coding agent working in ${cwd}.
 Complete the user's task, inspect the existing project before editing, and verify your changes by running the relevant checks. Keep your response concise and report real results. Use tools to act; never claim an action succeeded without a successful tool result.
 Use ${nativeTools ? 'Read, mcp__arncode__glob and mcp__arncode__grep' : 'read_file, list_dir, glob and grep'} to explore. Prefer exact ${nativeTools ? 'Edit' : 'edit_file'} changes to rewriting existing files. Read applicable AGENTS.md and CLAUDE.md files before editing. Tool paths are relative to the project. Bash starts in the project directory. Commands must finish within their timeout: split lengthy work into stages, set an appropriate timeout, and do not leave background processes behind. Tool outputs may be truncated; narrow the query or read a range. Never print or copy credentials, tokens or secret files. Permission denials are final for that action; explain what is blocked without trying a different tool to bypass the denial.
-${instructions.join('\n\n')}
+${context}${instructions.join('\n\n')}
 ${index}`);
 }

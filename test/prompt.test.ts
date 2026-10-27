@@ -36,5 +36,26 @@ describe('instruction and skill context', () => {
     expect(prompt).not.toContain(skill);
     expect(await systemPrompt(project)).toBe(prompt);
     expect(await systemPrompt(project, true)).toContain('mcp__arncode__skill');
+    // API sessions describe their environment; the OAuth preset has its own.
+    expect(prompt).toContain('- Not a Git repository');
+    expect(await systemPrompt(project, true)).not.toContain('Environment at the start');
+  });
+
+  it('falls back to Claude Code instruction files', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'arncode-prompt-'));
+    directories.push(dir);
+    const project = path.join(dir, 'project');
+    await mkdir(path.join(dir, 'home', '.claude'), { recursive: true });
+    await mkdir(project);
+    vi.stubEnv('ARNCODE_CONFIG_DIR', path.join(dir, 'config'));
+    vi.stubEnv('HOME', path.join(dir, 'home'));
+    await writeFile(path.join(dir, 'home', '.claude', 'CLAUDE.md'), 'Claude Code global marker.');
+    await writeFile(path.join(project, 'CLAUDE.local.md'), 'Local marker.');
+    const prompt = await systemPrompt(project);
+    expect(prompt).toContain('Global CLAUDE.md:\nClaude Code global marker.');
+    expect(prompt).toContain('Project CLAUDE.local.md:\nLocal marker.');
+    await mkdir(path.join(dir, 'config'));
+    await writeFile(path.join(dir, 'config', 'AGENTS.md'), 'ArnCode global marker.');
+    expect(await systemPrompt(project)).not.toContain('Claude Code global marker.');
   });
 });

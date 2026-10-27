@@ -131,7 +131,7 @@ Then ask: `Use review-change to review the staged diff.`
 
 Global skills live in `~/.arncode/skills`. The compatible project and global `.claude/skills` locations are also discovered. Project skills take precedence over global ones; `.arncode` takes precedence over `.claude` within each scope.
 
-Always-applicable instructions come from global `~/.arncode/AGENTS.md` and the project's root `AGENTS.md` and `CLAUDE.md`. API-key requests cache the stable system/tool prefix and move a conversation cache breakpoint forward as the task progresses. Cache reuse follows the provider's TTL and minimum-length rules. Large tool results and conversation context are bounded; full skill bodies stay out of the initial prompt. See [prompt caching](docs/reference.md#prompt-caching) for details.
+Always-applicable instructions come from global `~/.arncode/AGENTS.md` (or Claude Code's `~/.claude/CLAUDE.md` when that file does not exist) and the project's root `AGENTS.md`, `CLAUDE.md`, and `CLAUDE.local.md`. API-key sessions also tell the model the date, platform, shell, and Git branch when they start. API-key requests cache the stable system/tool prefix and move a conversation cache breakpoint forward as the task progresses. Cache reuse follows the provider's TTL and minimum-length rules. Large tool results and conversation context are bounded; full skill bodies stay out of the initial prompt. See [prompt caching](docs/reference.md#prompt-caching) for details.
 
 ## Storage and usage
 
