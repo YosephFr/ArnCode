@@ -264,6 +264,8 @@ async function runCLI(
   }
   env.ANTHROPIC_API_KEY = 'arncode-offline-test-key';
   env.ARNCODE_CONFIG_DIR = config;
+  // Instruction files in the real home directory must not reach test requests.
+  env.HOME = path.join(temporary, 'home');
   env.NO_COLOR = '1';
   Object.assign(env, extraEnv);
   return new Promise((resolve, reject) => {
