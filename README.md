@@ -31,7 +31,7 @@ cd /path/to/project
 arncode
 ```
 
-On first launch in a terminal, ArnCode offers credential setup if none are available. Add an API key or a long-lived OAuth token obtained with `claude setup-token` in the official Claude CLI. Credential input is hidden.
+On first launch in a terminal, ArnCode offers credential setup if none are available. With the official Claude CLI installed, choose to sign in with your Claude account: ArnCode runs `claude setup-token` in the same terminal and asks for the token it prints. You can also paste an API key or an existing token. Credential input is hidden.
 
 ```sh
 arncode -p "Find the cause of the failing tests and fix it"

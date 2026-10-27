@@ -7,6 +7,7 @@ import { credentialCommands, integer } from './commands/credentials.js';
 import { addProfile, detectCredentialType, loadCredentialCandidates } from './auth.js';
 import { resolveConfiguration } from './config.js';
 import { loadHistory, saveHistory } from './history.js';
+import { findExecutable, runSetupToken } from './onboarding.js';
 import { TerminalInput, readStdin } from './input.js';
 import { PERMISSION_MODES, PermissionManager } from './permissions.js';
 import { registerEnvironmentSecrets, redact } from './redact.js';
@@ -191,10 +192,24 @@ program.action(async (options: CliOptions) => {
   }
   if (!(await loadCredentialCandidates(settings)).length && input.interactive) {
     try {
+      let prompt = 'Paste an Anthropic API key, or a token from claude setup-token: ';
+      // With Claude Code installed, signing in is one step away: it prints a token to paste.
+      const claude =
+        settings.authRestriction === 'api-key' ? undefined : await findExecutable('claude');
+      if (claude) {
+        const choice = await input.question(
+          'Connect ArnCode\n  1. Sign in with your Claude account\n  2. Paste an API key or token\nChoose (1): ',
+        );
+        if (choice === undefined) return;
+        if ((choice.trim() || '1') === '1') {
+          input.close();
+          if (!(await runSetupToken(claude)))
+            throw new Error('Signing in did not finish. Run arncode again to retry.');
+          prompt = 'Paste the token it printed: ';
+        }
+      }
       // The token says what it is, so the only other question is its name.
-      const secret = await input.secret(
-        'Paste an Anthropic API key, or a token from claude setup-token: ',
-      );
+      const secret = await input.secret(prompt);
       let type = settings.authRestriction ?? detectCredentialType(secret);
       if (!type) {
         const answer = await input.question(
