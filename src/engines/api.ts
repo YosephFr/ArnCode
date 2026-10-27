@@ -120,6 +120,52 @@ function hasBlock(messages: BetaMessageParam[], type: string): boolean {
   );
 }
 
+/**
+ * History for a model that cannot take some mid-conversation system messages, as after a /model
+ * switch: effort-only messages are dropped, and announcements become reminders in the user turn
+ * they follow. Saved history is untouched, so switching back keeps the original.
+ */
+export function adaptSystemMessages(
+  messages: BetaMessageParam[],
+  support: { system: boolean; effort: boolean },
+): BetaMessageParam[] {
+  if (support.system && support.effort) return messages;
+  if (!messages.some((message) => (message.role as string) === 'system')) return messages;
+  const result: BetaMessageParam[] = [];
+  for (const message of messages) {
+    if ((message.role as string) !== 'system') {
+      result.push(message);
+      continue;
+    }
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : (message.content ?? [])
+            .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+            .join('\n');
+    // An effort-only message has nothing else to say.
+    if (!text) continue;
+    if (support.system) {
+      result.push(message);
+      continue;
+    }
+    const reminder = { type: 'text' as const, text: `<system-reminder>${text}</system-reminder>` };
+    const previous = result.at(-1);
+    if (previous?.role === 'user')
+      result[result.length - 1] = {
+        ...previous,
+        content: [
+          ...(typeof previous.content === 'string'
+            ? [{ type: 'text' as const, text: previous.content }]
+            : previous.content),
+          reminder,
+        ],
+      };
+    else result.push({ role: 'user', content: [reminder] });
+  }
+  return result;
+}
+
 /** Build one request. Pure, so the request shape can be tested without a network. */
 export function apiRequest(
   settings: Settings,
@@ -139,7 +185,10 @@ export function apiRequest(
   const betas = new Set<string>();
   // Full mode never rewrites earlier turns: edits would invalidate later thinking blocks and the
   // prompt cache. Compaction bounds those conversations instead.
-  const messages = full && features.compaction ? session.messages : apiContext(session.messages);
+  const messages = adaptSystemMessages(
+    full && features.compaction ? session.messages : apiContext(session.messages),
+    { system: full && features.systemMessages, effort: full && features.messageEffort },
+  );
   const thinking = features.adaptive
     ? {
         type: 'adaptive' as const,

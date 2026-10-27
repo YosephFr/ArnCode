@@ -29,6 +29,35 @@ function markers(value: unknown): number {
   return JSON.stringify(value).match(/"cache_control":/g)?.length ?? 0;
 }
 
+describe('model switches', () => {
+  it('turns system messages into reminders for a model that does not take them', () => {
+    const history: BetaMessageParam[] = [
+      { role: 'user', content: 'Plan it.' },
+      { role: 'system', content: 'Plan mode is on.' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Planned.' }] },
+      { role: 'system', content: [], output_config: { effort: 'high' } },
+      { role: 'user', content: 'Go.' },
+    ];
+    const { settings, session } = setup({}, history);
+    // Opus 5.5 takes both kinds as they are.
+    expect(apiRequest(settings, session, 'full').messages.map((m) => m.role)).toEqual([
+      'user',
+      'system',
+      'assistant',
+      'system',
+      'user',
+    ]);
+    const older = apiRequest({ ...settings, model: 'claude-sonnet-4-6' }, session, 'full');
+    expect(older.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+    expect(JSON.stringify(older.messages[0])).toContain(
+      '<system-reminder>Plan mode is on.</system-reminder>',
+    );
+    expect(older.betas ?? []).not.toContain('mid-conversation-output-config-2026-07-01');
+    // The saved history keeps its original shape for when the model changes back.
+    expect(session.messages).toHaveLength(5);
+  });
+});
+
 describe('API request shape', () => {
   it('selects full features only for the official endpoint unless overridden', () => {
     expect(apiMode({}, {})).toBe('full');
