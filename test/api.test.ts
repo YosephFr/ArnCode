@@ -2,15 +2,18 @@ import type {
   BetaContentBlock,
   BetaMessageParam,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages';
-import { describe, expect, it } from 'vitest';
+import type Anthropic from '@anthropic-ai/sdk';
+import { describe, expect, it, vi } from 'vitest';
 import { DEFAULTS } from '../src/config.js';
 import {
   apiMode,
   apiRequest,
   cacheConversation,
   historyContent,
+  keepCacheWarm,
   toolGroups,
 } from '../src/engines/api.js';
+import type { EngineContext } from '../src/engines/types.js';
 import { newSession } from '../src/session.js';
 import type { Settings } from '../src/types.js';
 
@@ -258,5 +261,40 @@ describe('incremental API prompt caching', () => {
     expect(next.at(-1)).toMatchObject({
       content: [{ text: 'Fix it.', cache_control: { type: 'ephemeral' } }],
     });
+  });
+});
+
+describe('cache keep-alive', () => {
+  it('refreshes the cached prefix while tools run and stops afterwards', async () => {
+    vi.useFakeTimers();
+    try {
+      const create = vi.fn(async (_params: Record<string, unknown>) => ({
+        model: 'claude-opus-5-5',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 90_000 },
+      }));
+      const onUsage = vi.fn(async () => {});
+      const ctx = {
+        onRequest: vi.fn(async () => {}),
+        onUsage,
+        signal: new AbortController().signal,
+        settings: { ...DEFAULTS, cwd: '/project' },
+      } as unknown as EngineContext;
+      const client = { beta: { messages: { create } } } as unknown as Anthropic;
+      const { settings, session } = setup();
+      const params = apiRequest(settings, session, 'full');
+      const stop = keepCacheWarm(ctx, client, 'full', params);
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+      expect(create).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create.mock.calls[0]![0]).toMatchObject({ max_tokens: 0, stream: false });
+      expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({ cacheReadTokens: 90_000 }));
+      stop();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(keepCacheWarm(ctx, client, 'basic', params)).toBeTypeOf('function');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

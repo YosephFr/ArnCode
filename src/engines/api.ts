@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type {
   BetaContentBlock,
   BetaContentBlockParam,
@@ -54,8 +54,10 @@ const MAX_IMAGE_BYTES = 18_000_000;
 const CONTINUE_AFTER_SUMMARY =
   'Continue the task from the summary above. Inspect files before repeating an edit or command.';
 
-export function apiClient(secret: string, baseURL?: string): Anthropic {
-  return new Anthropic({
+/** The Messages API client, loaded on first use so OAuth sessions never pay for it. */
+export async function apiClient(secret: string, baseURL?: string): Promise<Anthropic> {
+  const { default: Client } = await import('@anthropic-ai/sdk');
+  return new Client({
     apiKey: secret,
     authToken: null,
     baseURL,
@@ -321,10 +323,11 @@ async function prepareConversation(ctx: EngineContext, mode: ApiMode): Promise<v
  */
 export async function compactConversation(
   ctx: EngineContext,
-  client = apiClient(ctx.credential.secret, ctx.settings.baseUrl),
+  existing?: Anthropic,
   keepLast = false,
 ): Promise<boolean> {
   const { settings, session, ui, signal } = ctx;
+  const client = existing ?? (await apiClient(ctx.credential.secret, settings.baseUrl));
   const mode = apiMode(settings);
   if (!canCompact(settings, mode)) return false;
   session.api ??= {
@@ -408,6 +411,39 @@ function estimateTokens(value: unknown): number {
 }
 
 const reportedMcpErrors = new Set<string>();
+
+/** Refresh slightly before the default five-minute cache lifetime runs out. */
+const KEEP_ALIVE_MS = 4 * 60_000;
+
+/**
+ * While tools run past the cache lifetime, re-send the previous request with `max_tokens: 0`.
+ * That refreshes the cached prefix for the price of a cache read, instead of writing the whole
+ * conversation again on the next request.
+ */
+export function keepCacheWarm(
+  ctx: EngineContext,
+  client: Anthropic,
+  mode: ApiMode,
+  params: BetaMessageStreamParams | undefined,
+): () => void {
+  if (mode !== 'full' || !params) return () => {};
+  const timer = setInterval(() => {
+    void (async () => {
+      try {
+        await ctx.onRequest();
+        const message = await client.beta.messages.create(
+          { ...params, max_tokens: 0, stream: false },
+          { signal: ctx.signal },
+        );
+        await ctx.onUsage(usageFromAPI(message.model, message.usage, ctx.settings.baseUrl));
+      } catch {
+        // A failed refresh only means the next request writes the cache again.
+      }
+    })();
+  }, KEEP_ALIVE_MS);
+  timer.unref();
+  return () => clearInterval(timer);
+}
 
 const EXPLORE_TOOLS = ['read_file', 'list_dir', 'glob', 'grep', 'skill'];
 const GENERAL_TOOLS = [...EXPLORE_TOOLS, 'write_file', 'edit_file', 'bash', 'todo_write'];
@@ -494,7 +530,7 @@ async function runSubagent(
 export async function runAPI(ctx: EngineContext): Promise<void> {
   const { settings, session, ui, signal } = ctx;
   const mode = apiMode(settings);
-  const client = apiClient(ctx.credential.secret, settings.baseUrl);
+  const client = await apiClient(ctx.credential.secret, settings.baseUrl);
   const latest = session.messages.at(-1);
   if (ctx.prompt && latest?.role === 'user' && latest.content === ctx.prompt) {
     const attachment = await attachMentions(ctx.prompt, {
@@ -555,6 +591,7 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
   });
   let cutoffs = 0;
   let malformed = 0;
+  let lastParams: BetaMessageStreamParams | undefined;
   while (ctx.budget.remaining > 0) {
     signal.throwIfAborted();
     ctx.budget.remaining--;
@@ -568,6 +605,7 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
           await ctx.onRequest();
           const params = apiRequest(settings, session, mode, { extraTools: mcp?.definitions });
           params.messages = await hydrateMessages(params.messages, session.id);
+          lastParams = params;
           const stream = openStream(client, params, mode, signal);
           stream.on('text', (text) => {
             partialText += text;
@@ -668,13 +706,14 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
       const results: BetaToolResultBlockParam[] = [];
       for (const group of toolGroups(calls)) {
         // Every call gets a result, even when cancellation interrupts a batch.
+        const stopKeepAlive = keepCacheWarm(ctx, client, mode, lastParams);
         const outcomes = await Promise.all(
           group.map((call) =>
             signal.aborted
               ? { content: 'Interrupted before execution.', is_error: true }
               : runner.run(call.name, call.input, signal),
           ),
-        );
+        ).finally(stopKeepAlive);
         for (const [index, call] of group.entries()) {
           const outcome = outcomes[index]!;
           results.push(await toolResultBlock(session, call, outcome));
