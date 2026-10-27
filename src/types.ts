@@ -1,4 +1,5 @@
 import type { HooksConfig } from './hooks.js';
+import type { McpServers } from './mcp.js';
 export type AuthMode = 'api-key' | 'oauth';
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type PermissionMode = 'full' | 'edits' | 'ask' | 'plan';
@@ -31,6 +32,8 @@ export interface Settings {
   protectedPaths: string[];
   /** Command hooks from the user's configuration. */
   hooks?: HooksConfig;
+  /** MCP servers from the user's configuration. */
+  mcpServers?: McpServers;
 }
 
 export interface TodoItem {

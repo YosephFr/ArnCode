@@ -584,6 +584,30 @@ describe('hooks', () => {
   }, 30_000);
 });
 
+describe('MCP servers', () => {
+  it('offers configured MCP tools to the model and runs them', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/mcp-server.mjs', import.meta.url));
+    await mkdir(config, { recursive: true });
+    await writeFile(
+      path.join(config, 'config.json'),
+      JSON.stringify({ mcpServers: { fixture: { command: process.execPath, args: [fixture] } } }),
+    );
+    const api = await mockAPI([
+      { tool: { name: 'mcp__fixture__echo', id: 'echo_call', input: { message: 'hi' } } },
+      { text: ['The server said hi.\n'] },
+    ]);
+    const run = await runCLI(api.url, ['-p', 'Ask the server to echo hi.']);
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toBe('The server said hi.\n');
+    expect(api.requests[0]!.body.tools?.map((tool) => (tool as { name: string }).name)).toEqual(
+      expect.arrayContaining(['mcp__fixture__echo', 'mcp__fixture__fail']),
+    );
+    expect(api.requests[1]!.body.messages.at(-1)).toMatchObject({
+      content: [{ type: 'tool_result', tool_use_id: 'echo_call', content: 'echo: hi' }],
+    });
+  }, 30_000);
+});
+
 describe('official-endpoint API features', () => {
   const full = { ARNCODE_API_FEATURES: 'full' };
 

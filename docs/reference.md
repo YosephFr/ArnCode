@@ -199,6 +199,25 @@ Costs are estimates based on known model pricing or the SDK's reported estimate.
 
 OAuth persists observed streamed tokens as unpriced usage while a run is active. The final SDK result reconciles token counts and cost without counting them twice. If the run is interrupted, observed tokens remain recorded with cost unavailable.
 
+### MCP servers
+
+Connect Model Context Protocol servers by adding them to `~/.arncode/config.json` in the `mcpServers` format Claude Code uses:
+
+```json
+{
+  "mcpServers": {
+    "issues": { "command": "npx", "args": ["-y", "some-mcp-server"], "env": { "TOKEN": "…" } },
+    "docs": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer …" }
+    }
+  }
+}
+```
+
+Stdio servers start in the project directory; `http` and `sse` servers are reached over the network. Their tools appear to the model as `mcp__<server>__<tool>` in both auth modes and follow the permission mode, hooks, and redaction like built-in tools; registered secrets in `env` and `headers` are redacted. API-key sessions start the servers on the first request and keep them for the session; a server that fails to start is reported once and skipped. `/mcp` lists servers and their tools. Like hooks, servers load from your configuration only, never from a project's own files.
+
 ### Hooks
 
 Hooks run your shell commands at points in a session, in the format Claude Code uses, so existing command hooks can be copied over. Add them to `~/.arncode/config.json`:

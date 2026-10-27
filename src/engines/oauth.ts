@@ -16,7 +16,7 @@ import { createPathPolicy, projectPath } from '../tools/paths.js';
 import { ToolRunner, resultText, toolSchemas } from '../tools/index.js';
 import { discoverSkills, loadSkill } from '../skills.js';
 import { z } from 'zod';
-import { redact, StreamingRedactor } from '../redact.js';
+import { redact, registerSecret, StreamingRedactor } from '../redact.js';
 import type { Approval, TodoItem } from '../types.js';
 import type { EngineContext } from './types.js';
 import { OAuthUsageTracker } from './oauth-usage.js';
@@ -284,7 +284,13 @@ export async function oauthOptions(
       isError: result.is_error,
     };
   };
+  for (const value of Object.values(ctx.settings.mcpServers ?? {}).flatMap((server) => [
+    ...Object.values('env' in server ? (server.env ?? {}) : {}),
+    ...Object.values('headers' in server ? (server.headers ?? {}) : {}),
+  ]))
+    registerSecret(value);
   const mcpServers: NonNullable<Options['mcpServers']> = {
+    ...(ctx.settings.mcpServers as NonNullable<Options['mcpServers']> | undefined),
     arncode: createSdkMcpServer({
       name: 'arncode',
       version: '0.1.0',

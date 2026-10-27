@@ -88,6 +88,8 @@ const DISPLAY_NAMES: Record<string, string> = {
 
 export function displayName(name: string): string {
   const bare = name.replace(/^mcp__arncode__/, '');
+  const server = /^mcp__(.+?)__(.+)$/.exec(bare);
+  if (server) return `${server[1]}:${server[2]}`;
   return DISPLAY_NAMES[bare] ?? bare;
 }
 

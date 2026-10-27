@@ -5,6 +5,7 @@ import type {
   BetaMessage,
   BetaMessageParam,
   BetaMessageStreamParams,
+  BetaTool,
   BetaToolResultBlockParam,
   BetaToolUseBlock,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages';
@@ -27,6 +28,7 @@ import {
 } from '../tools/index.js';
 import { SubagentUI } from '../subagent-ui.js';
 import { SUMMARY_INSTRUCTIONS } from '../summary.js';
+import { connectMcp } from '../mcp.js';
 import { emptyUsage, usageFromAPI } from '../usage.js';
 import type { Settings } from '../types.js';
 import type { EngineContext } from './types.js';
@@ -121,13 +123,16 @@ export function apiRequest(
   settings: Settings,
   session: Session,
   mode: ApiMode,
-  options: { compaction?: boolean } = {},
+  options: { compaction?: boolean; extraTools?: BetaTool[] } = {},
 ): BetaMessageStreamParams {
   const features = modelFeatures(settings.model);
   const conversation = session.api ?? { system: '', effort: settings.effort };
-  const tools = conversation.tools
-    ? toolDefinitions.filter((tool) => conversation.tools!.includes(tool.name))
-    : toolDefinitions;
+  const tools = [
+    ...(conversation.tools
+      ? toolDefinitions.filter((tool) => conversation.tools!.includes(tool.name))
+      : toolDefinitions),
+    ...(options.extraTools ?? []),
+  ];
   const full = mode === 'full';
   const betas = new Set<string>();
   // Full mode never rewrites earlier turns: edits would invalidate later thinking blocks and the
@@ -402,6 +407,8 @@ function estimateTokens(value: unknown): number {
   return Math.ceil(JSON.stringify(value).length / 3);
 }
 
+const reportedMcpErrors = new Set<string>();
+
 const EXPLORE_TOOLS = ['read_file', 'list_dir', 'glob', 'grep', 'skill'];
 const GENERAL_TOOLS = [...EXPLORE_TOOLS, 'write_file', 'edit_file', 'bash', 'todo_write'];
 const SUBAGENT_TURNS = 40;
@@ -511,6 +518,15 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
     await compactConversation(ctx, client, true);
   }
   await prepareConversation(ctx, mode);
+  const mcp =
+    settings.mcpServers && !session.api?.tools
+      ? await connectMcp(settings.mcpServers, settings.cwd)
+      : undefined;
+  for (const status of mcp?.status ?? []) {
+    if (!status.error || reportedMcpErrors.has(status.server)) continue;
+    reportedMcpErrors.add(status.server);
+    ui.notice(`MCP server ${status.server} is unavailable: ${status.error}`);
+  }
   const runner = new ToolRunner({
     cwd: settings.cwd,
     approve: ctx.approve,
@@ -518,6 +534,7 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
     protectedPaths: settings.protectedPaths,
     allowedTools: session.api?.tools,
     hooks: ctx.hooks,
+    ...(mcp ? { external: mcp } : {}),
     ...(session.api?.tools && !session.api.tools.includes('task')
       ? {}
       : { subagent: (request, abort) => runSubagent(ctx, request, abort) }),
@@ -549,7 +566,7 @@ export async function runAPI(ctx: EngineContext): Promise<void> {
       message = await withRetry(
         async () => {
           await ctx.onRequest();
-          const params = apiRequest(settings, session, mode);
+          const params = apiRequest(settings, session, mode, { extraTools: mcp?.definitions });
           params.messages = await hydrateMessages(params.messages, session.id);
           const stream = openStream(client, params, mode, signal);
           stream.on('text', (text) => {

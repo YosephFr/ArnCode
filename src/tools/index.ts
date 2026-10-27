@@ -163,6 +163,15 @@ export class ToolRunner {
       /** Tools this runner may execute; every tool when absent. */
       allowedTools?: readonly string[];
       hooks?: Hooks;
+      /** Tools served elsewhere, such as MCP servers. */
+      external?: {
+        has(name: string): boolean;
+        call(
+          name: string,
+          input: Record<string, unknown>,
+          signal?: AbortSignal,
+        ): Promise<ToolResult>;
+      };
     },
   ) {}
 
@@ -209,6 +218,15 @@ export class ToolRunner {
   private async execute(name: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
     try {
       signal?.throwIfAborted();
+      const { external } = this.options;
+      if (external?.has(name)) {
+        const args = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+        this.options.ui.tool(name, args);
+        const approval = await this.options.approve(name, args, signal);
+        if (!approval.allowed) throw new Error(approval.reason ?? `Permission denied for ${name}.`);
+        this.options.ui.status(`Running ${name}`);
+        return await external.call(name, args, signal);
+      }
       if (!Object.hasOwn(schemas, name)) throw new Error(`Unknown tool: ${name}`);
       if (this.options.allowedTools && !this.options.allowedTools.includes(name))
         throw new Error(`${name} is not available to this agent.`);

@@ -14,6 +14,7 @@ import { newSession, latestSession, listSessions, loadSession, saveSession } fro
 import { compactSession, errorText, runTask } from './runner.js';
 import { SLASH_COMMANDS, slashCommand, type ReplState } from './repl.js';
 import { loadCustomCommands } from './commands/custom.js';
+import { closeMcp } from './mcp.js';
 import { MODE_LABELS, planUsageFrom, statusLine, type PlanUsage } from './status.js';
 import { InteractiveApp, type Suggestion } from './tui/app.js';
 import { themeFor } from './tui/theme.js';
@@ -560,7 +561,10 @@ for (const stream of [process.stdout, process.stderr])
     throw error;
   });
 
-await program.parseAsync().catch((error: unknown) => {
-  ui.notice(errorText(error));
-  process.exitCode = 1;
-});
+await program
+  .parseAsync()
+  .catch((error: unknown) => {
+    ui.notice(errorText(error));
+    process.exitCode = 1;
+  })
+  .finally(() => closeMcp());

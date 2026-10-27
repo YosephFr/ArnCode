@@ -5,6 +5,7 @@ import { printCredentials, printUsage } from './commands/credentials.js';
 import { expandCommand, type CustomCommand } from './commands/custom.js';
 import { KNOWN_MODELS, MODEL_ALIASES, modelFeatures, resolveModel } from './models.js';
 import { referencedBytes } from './blobs.js';
+import { connectMcp } from './mcp.js';
 import { newSession, type Session } from './session.js';
 import { MODE_LABELS, contextBudget, type PlanUsage } from './status.js';
 import { compactNumber, duration } from './tui/text.js';
@@ -32,6 +33,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: '/resume', description: 'Continue an earlier conversation in this project' },
   { name: '/clear', description: 'Start a new conversation' },
   { name: '/init', description: 'Write AGENTS.md for this project' },
+  { name: '/mcp', description: 'Show MCP servers and their tools' },
   { name: '/export', usage: '[file]', description: 'Save the conversation as Markdown' },
   { name: '/fast', usage: '[on|off]', description: 'Toggle fast mode' },
   { name: '/auth', usage: '[type|auto]', description: 'Choose api-key, oauth, or the mixed bank' },
@@ -249,6 +251,23 @@ export async function slashCommand(line: string, state: ReplState): Promise<Slas
     }
     case '/init':
       return { prompt: INIT_PROMPT };
+    case '/mcp': {
+      if (!settings.mcpServers || !Object.keys(settings.mcpServers).length) {
+        ui.notice('No MCP servers. Add them under "mcpServers" in ~/.arncode/config.json.');
+        break;
+      }
+      const { status } = await connectMcp(settings.mcpServers, settings.cwd);
+      ui.notice(
+        status
+          .map((server) =>
+            server.error
+              ? `${server.server}: unavailable (${server.error})`
+              : `${server.server}: ${server.tools} tool${server.tools === 1 ? '' : 's'}`,
+          )
+          .join('\n'),
+      );
+      break;
+    }
     default: {
       const custom = state.custom?.find((item) => item.name === command);
       if (custom) return { prompt: expandCommand(custom, value) };
