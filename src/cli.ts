@@ -243,7 +243,12 @@ program.action(async (options: CliOptions) => {
       if (app) {
         const tool = displayName(name);
         // The tool line is already on screen; show what an edit would change, then ask briefly.
-        const change = await proposedChange(settings.cwd, name, args).catch(() => undefined);
+        const change = await proposedChange(
+          settings.cwd,
+          name,
+          args,
+          settings.protectedPaths,
+        ).catch(() => undefined);
         if (change) ui.diff(change.file, change.before, change.after, { proposed: true });
         const answer = await app.select(
           ['bash', 'Bash'].includes(name)

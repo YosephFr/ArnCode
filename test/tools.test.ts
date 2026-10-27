@@ -492,6 +492,12 @@ describe('approval previews', () => {
         content: '# Notes\n',
       }),
     ).toEqual({ file: path.join('notes', 'new.md'), before: '', after: '# Notes\n' });
+    // Protected files and paths outside the project are never read for a preview.
+    await writeFile(path.join(directory, '.env'), 'TOKEN=1\n');
+    for (const target of ['.env', path.join(directory, '..', 'elsewhere.txt')])
+      expect(
+        await proposedChange(directory, 'write_file', { path: target, content: 'x' }),
+      ).toBeUndefined();
     // An edit that would not apply has no preview, so the prompt falls back to the tool summary.
     expect(
       await proposedChange(directory, 'Edit', {

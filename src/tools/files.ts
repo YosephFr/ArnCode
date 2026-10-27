@@ -277,6 +277,7 @@ export async function proposedChange(
   cwd: string,
   name: string,
   args: Record<string, unknown>,
+  protectedPaths?: readonly string[],
 ): Promise<{ file: string; before: string; after: string } | undefined> {
   const target =
     typeof args.file_path === 'string'
@@ -285,7 +286,10 @@ export async function proposedChange(
         ? args.path
         : undefined;
   if (!target) return undefined;
-  const file = path.resolve(cwd, target);
+  // The same checks as the tools: nothing outside the project or protected is read for display.
+  const policy = await createPathPolicy(cwd, protectedPaths);
+  const file = await projectPath(cwd, target, true, policy).catch(() => undefined);
+  if (!file) return undefined;
   const relative = path.relative(cwd, file);
   const shown =
     relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : file;
