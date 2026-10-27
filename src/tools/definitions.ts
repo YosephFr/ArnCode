@@ -37,7 +37,7 @@ export const toolDefinitions: Tool[] = [
   {
     name: 'edit_file',
     description:
-      'Replace an exact string in a project file. old_string must match exactly once unless replace_all is true; include surrounding text to disambiguate.',
+      'Replace text in a project file. Copy old_string from read_file output without the line-number prefix; write line breaks as \\n and the file keeps its CRLF or LF endings. If there is no exact match, quote, dash and space variants and then trailing whitespace are ignored. old_string must match exactly once unless replace_all is true; include surrounding text to disambiguate. new_string must be the complete text, never a placeholder such as "rest of code".',
     input_schema: {
       type: 'object',
       properties: {

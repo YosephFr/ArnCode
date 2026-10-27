@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline';
 import type { AgentUI } from '../types.js';
 import { redact } from '../redact.js';
 import { prepareImage, probeImage, type PreparedImage } from '../images.js';
+import { matchEdit, nearbyLines, omissionPlaceholders } from './match.js';
 import {
   createPathPolicy,
   ensureDirectory,
@@ -162,22 +163,50 @@ export async function editText(
 ): Promise<string> {
   const file = await projectPath(cwd, input.path, false, policy);
   const before = await textFile(file);
-  const parts = before.split(input.old_string);
-  const matches = parts.length - 1;
-  if (matches === 0)
-    throw new Error('old_string was not found. Read the file and copy the exact text.');
-  if (matches > 1 && !input.replace_all) {
+  if (input.old_string === input.new_string)
+    throw new Error('old_string and new_string are identical; there is nothing to change.');
+  const placeholders = omissionPlaceholders(input.new_string).filter(
+    (line) => !input.old_string.includes(line),
+  );
+  if (placeholders.length)
     throw new Error(
-      `old_string matches ${matches} times. Add surrounding text or set replace_all to true.`,
+      `new_string contains a placeholder instead of code (${placeholders[0]}). Write the complete replacement text.`,
+    );
+  const { matches, tier, replace } = matchEdit(before, input.old_string, input.new_string);
+  if (matches.length === 0) {
+    const near = nearbyLines(before, input.old_string);
+    throw new Error(
+      `old_string was not found. ${near.length ? `Its first line appears at line ${near.join(', ')}; read that range and copy the exact text.` : 'Read the file and copy the exact text, without line-number prefixes.'}`,
     );
   }
-  const after = parts.join(input.new_string);
+  if (matches.length > 1 && !input.replace_all) {
+    throw new Error(
+      `old_string matches ${matches.length} times. Add surrounding text or set replace_all to true.`,
+    );
+  }
+  const applied = input.replace_all ? matches : matches.slice(0, 1);
+  const after = applied
+    .reverse()
+    .reduce(
+      (content, match) => content.slice(0, match.start) + replace(match) + content.slice(match.end),
+      before,
+    );
   if (Buffer.byteLength(after) > MAX_FILE_BYTES)
     throw new Error('Edited content exceeds the 5 MiB edit limit.');
-  if (before === after) return 'No change: old_string and new_string are identical.';
+  if (after === before)
+    throw new Error(
+      'The edit leaves the file unchanged. Line endings follow the file; write \\r explicitly to change them.',
+    );
   await atomicWrite(file, after);
   ui.diff(path.relative(cwd, file), redact(before), redact(after));
-  return `Edited ${path.relative(cwd, file)} (${matches} replacement${matches === 1 ? '' : 's'}).`;
+  const count = applied.length;
+  const note =
+    tier === 'typography'
+      ? '; matched ignoring quote and dash variants'
+      : tier === 'trailing-whitespace'
+        ? '; matched ignoring trailing whitespace'
+        : '';
+  return `Edited ${path.relative(cwd, file)} (${count} replacement${count === 1 ? '' : 's'}${note}).`;
 }
 
 export async function listDirectory(
